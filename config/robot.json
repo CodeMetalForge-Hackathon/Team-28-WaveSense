@@ -6,7 +6,7 @@
     "forward_angle_method": "hand ~30 cm in front of the robot, held vs removed (hand cluster 349..18 deg, center 4.2, nearest 1.8 deg at 315 mm); cluttered desk",
     "angle_direction": "cw",
     "angle_direction_verified": false,
-    "angle_direction_note": "Slamtec convention (angle increases clockwise seen from above). Left-side hand check did not register; verify (Phase 4) before relying on left/right.",
+    "angle_direction_note": "Slamtec convention (angle increases clockwise seen from above). Hand checks at the robot's left (Phase 2, Phase 4) and front-left (Phase 4) never crossed the scan plane at the desk; front/back are unaffected by this setting, only left/right would swap. Verify in the floor session.",
     "range_offset_mm": 0,
     "range_offset_verified": false,
     "range_note": "No measured reference: the 1000 mm object was never detected (moving clutter 30-45 cm from the LiDAR). Offset stays 0 until 1000 mm and ~300 mm agree."
@@ -23,5 +23,22 @@
     "min_duty": 35,
     "min_duty_note": "Front-left (M1) alone: hummed at duty 30, turned at 35 (battery 6.4-7.2 V, wheels up, 2026-11-07). Non-zero wheel commands map into min_duty..duty_cap.",
     "duty_cap_max": 50
-  }
+  },
+  "proximity": {
+    "mode": "advisory",
+    "mode_note": "Operator decision 2026-11-07: human-operated, warnings only; proximity never changes drive commands.",
+    "distances_from": "lidar_center",
+    "distances_note": "Operator decision: keep distances from the LiDAR spin centre (not the robot body edge). Show them labelled as such.",
+    "close_mm": 300,
+    "near_mm": 600,
+    "stale_s": 0.5,
+    "ignore_below_mm": 60,
+    "self_mask": [],
+    "live_check": "2026-11-07 hand in front: front sector 1154 -> 459 mm, level near; raw 1..13 deg; scan age 36 ms"
+  },
+  "todo_floor_session": [
+    "range check: flat object at 1000 mm and ~300 mm from the LiDAR centre",
+    "angle direction: object at the robot's left and right",
+    "camera HFOV and yaw: objects at the left/right image edges"
+  ]
 }
