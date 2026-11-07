@@ -59,6 +59,7 @@ class Chassis:
         self.min_duty = config_min_duty() if min_duty is None else max(0.0, float(min_duty))
         self.slew = float(slew)                # duty units per second
         self.watchdog_s = float(watchdog_s)
+        self.trip_s = max(0.05, self.watchdog_s - 0.05)   # actual trip point, 50 ms margin
         self.dt = 1.0 / rate_hz
         self.port = port
         self.events = []                        # (monotonic t, text) for tests / logs
@@ -202,9 +203,10 @@ class Chassis:
                     target, last = dict(self._target), self._last_cmd
                     moving = any(abs(v) > 1e-6 for v in target.values()) or \
                         any(abs(v) > 1e-6 for v in self._current.values())
-                # trip two ticks early (260-280 ms at 50 Hz) so scheduling jitter can't push the
-                # stop past watchdog_s (one tick early measured 300.02 ms once)
-                if moving and now - last >= self.watchdog_s - 2 * self.dt:
+                # Trip 50 ms before watchdog_s and wake exactly at that deadline (see the sleep
+                # below), so tick alignment and scheduling jitter can't push the stop past
+                # watchdog_s. Measured before this change: 287 ms on hardware, 300.02 ms once in tests.
+                if moving and now - last >= self.trip_s:
                     self.watchdog_trips += 1
                     self.stop(f"watchdog: no command for {1000 * (now - last):.0f} ms")
                 else:
@@ -222,7 +224,11 @@ class Chassis:
                         self._send(motor_frame({m: FORWARD_SIGN[m] * cur[m] for m in MOTORS}))
                 prev = now
                 nxt += self.dt
-                time.sleep(max(0.0, nxt - time.monotonic()))
+                wake = nxt
+                with self._lock:
+                    if any(abs(v) > 1e-6 for v in self._current.values()) and self._last_cmd:
+                        wake = min(wake, self._last_cmd + self.trip_s)
+                time.sleep(max(0.0, wake - time.monotonic()))
         except Exception as e:
             self.error = f"control loop crashed: {e}"
             self._log(self.error)

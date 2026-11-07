@@ -62,3 +62,34 @@ Once, after the robot was moved onto the floor, the board stopped responding. It
 - The cause isn't confirmed. A battery voltage dip under load is the main suspect. The battery voltage wasn't measured.
 
 If it happens again, power-cycle the board first. Then beep before and after a floor run to check the board stays responsive.
+
+## Chassis driver (`robot/chassis.py`), verified wheels-up 2026-11-07
+
+Inputs are -1..1: `vx` forward+, `vy` left+, `wz` counter-clockwise+. X-layout mecanum mixing. All checks at duty 40 for 0.5 s, each wheel confirmed by eye:
+
+| Motion | FL (M1) | FR (M2) | RL (M3) | RR (M4) | Board duties sent |
+|---|---|---|---|---|---|
+| forward | fwd | fwd | fwd | fwd | `{1: -40, 2: 40, 3: -40, 4: 40}` |
+| back | back | back | back | back | `{1: 40, 2: -40, 3: 40, 4: -40}` |
+| strafe left | back | fwd | fwd | back | `{1: 40, 2: 40, 3: -40, 4: -40}` |
+| strafe right | fwd | back | back | fwd | `{1: -40, 2: -40, 3: 40, 4: 40}` |
+| rotate CCW | back | fwd | back | fwd | `{1: 40, 2: 40, 3: 40, 4: 40}` |
+| rotate CW | fwd | back | fwd | back | `{1: -40, 2: -40, 3: -40, 4: -40}` |
+
+Strafing was only checked wheels-up, by each wheel's direction. Whether the robot actually moves sideways on the floor depends on the roller layout and isn't verified yet.
+
+**Start threshold:** M1 hums at duty 30 and turns at 35. `config/robot.json` sets `chassis.min_duty = 35`, so any non-zero wheel command maps into 35..duty_cap.
+
+**Stop paths:**
+
+| Path | How | Measured |
+|---|---|---|
+| Watchdog, no command | the control loop wakes at its deadline | stop written +259 ms after the last command on hardware; always 250.1 ms in tests, also with all 4 cores at 100% |
+| `stop()` | immediate, bypasses slew | zero frame < 10 ms (tests) |
+| SIGTERM / SIGHUP / SIGINT | signal handler stops, then `SystemExit` | stop at the signal (+415 ms test) |
+| Exception or `close()` in a `with` block | `__exit__` → stop | tests |
+| SIGKILL, crash, stalled control thread | `robot/deadman.py` child, own UART handle, 20 ms heartbeat | STOP 53 ms after SIGKILL on hardware |
+
+**Battery:** the board reports voltage about 9 times a second (`status()["battery_v"]`). On battery it read 7.17 V idle and sagged to 6.26 V at duty 40.
+
+**Limit:** if the Pi loses power or hard-crashes, the board keeps its last duty. Keep the board switch reachable.
