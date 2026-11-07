@@ -1,0 +1,36 @@
+# Scoped to wifi-sensing/ on purpose: a repo-root .gitignore is left to the team.
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+*.token
+api_token*
+secrets/
+
+# ESP32 provisioning output and NVS images (contain the Wi-Fi password)
+esp32-provision-state/
+nvs*.bin
+nvs*.csv
+
+# Firmware images and flash backups (third-party binaries; backups can hold credentials)
+*.bin
+*.elf
+*.tar.gz
+backups/
+firmware/
+
+# Local captures, recordings and logs (RF data from people, possibly credentials)
+captures/
+recordings/
+logs/
+*.log
+*.pcap
+*.pcapng
+*.jsonl
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
