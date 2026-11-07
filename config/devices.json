@@ -1,5 +1,6 @@
 {
   "rgb": "/dev/v4l/by-id/usb-icSpring_icspring_camera-video-index0",
   "thermal": "/dev/v4l/by-id/usb-HIK_HikCamera_F10615613-video-index0",
-  "lidar": "/dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_12c5f3c13d70f01191c090301045c30f-if00-port0"
+  "lidar": "/dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_12c5f3c13d70f01191c090301045c30f-if00-port0",
+  "motor_board": "/dev/ttyAMA0"
 }

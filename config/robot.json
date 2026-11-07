@@ -18,5 +18,10 @@
     "yaw_offset_deg": 0,
     "yaw_measured": false,
     "note": "Wide-angle lens with visible barrel distortion. Measure with objects at the left/right image edges, robot on the floor in a clear area. Placeholder is NOT measured."
+  },
+  "chassis": {
+    "min_duty": 35,
+    "min_duty_note": "Front-left (M1) alone: hummed at duty 30, turned at 35 (battery 6.4-7.2 V, wheels up, 2026-11-07). Non-zero wheel commands map into min_duty..duty_cap.",
+    "duty_cap_max": 50
   }
 }
