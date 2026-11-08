@@ -1,3 +1,5 @@
+Latest mobile/radar update: [HANDOFF-MOBILE.md](HANDOFF-MOBILE.md).
+
 # radar: still and moving person CANDIDATES from a 24 GHz FMCW radar (TinyRad)
 
 **Status: experimental, measured on one recording and one live session (2026-11-07). Not validated for life-safety use.**

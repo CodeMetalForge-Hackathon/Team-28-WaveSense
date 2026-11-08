@@ -42,6 +42,7 @@ class TinyRadDevice:
     def __init__(self, f_start=24.0e9, f_stop=24.25e9, n=256, period=2e-3, tx=1, tx_amp=100):
         self.f_start, self.f_stop, self.n, self.period, self.tx, self.tx_amp = f_start, f_stop, n, period, tx, tx_amp
         self.rad = None
+        self.rx_calibration = None
 
     @property
     def bandwidth(self) -> float:
@@ -94,6 +95,13 @@ class TinyRadDevice:
         guard_vendor_signals(Connection)  # USB recovery runs in the acquisition thread.
         self.rad = TinyRad()
         self.rad.BrdRst()
+        self.rx_calibration = None
+        try:
+            factory = np.asarray(self.rad.BrdGetCalDat()['Dat'],dtype=complex)[:4]
+            if factory.shape==(4,) and np.isfinite(factory).all() and np.all((np.abs(factory)>.01)&(np.abs(factory)<100)):
+                self.rx_calibration = factory
+        except Exception:
+            pass  # Range detection continues; never invent direction without correction.
         self.rad.RfRxEna()
         self.rad.RfTxEna(self.tx, self.tx_amp)
         self.rad.RfMeas({"fStrt": self.f_start, "fStop": self.f_stop, "TRampUp": self.n * 1e-6, "N": self.n,

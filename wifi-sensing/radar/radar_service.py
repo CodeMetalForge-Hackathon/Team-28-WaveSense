@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from radar_engine import RadarCalibration, RadarEngine  # noqa: E402
 from radar_recovery import RecoveryBackoff
+from radar_scene import RadarScene
 
 REC = struct.Struct("<dHH")
 CONTRACT_DEFAULT = "/srv/team28/runtime/radar/status.json"
@@ -85,6 +86,9 @@ class RadarService:
         self.dev, self.cal_path, self.record_dir = device, cal_path, record_dir
         cal = RadarCalibration.load(cal_path) if (not adaptive and os.path.exists(cal_path)) else None
         self.eng = RadarEngine(device.range_axis(RadarEngine.NFFT), cal, near_range_m, adaptive=adaptive)
+        self.scene = RadarScene(device.range_axis(512), device.wavelength,
+                                getattr(device,'rx_calibration',None), 299792458/(2*device.bandwidth))
+        self.scene_error = None
         self.lock, self.stop = threading.Lock(), threading.Event()
         self.report: dict = dict(state="starting")
         self.rec = None
@@ -104,6 +108,11 @@ class RadarService:
                     self.error = None
                     with self.lock:
                         self.eng.feed(t, frame)
+                        try:
+                            self.scene.feed(t, frame)
+                            self.scene_error = None
+                        except Exception as scene_error:
+                            self.scene_error = type(scene_error).__name__
                         if self.rec:
                             self.rec.write(REC.pack(t, *frame.shape) + frame.astype("<i2").tobytes())
                             self.rec_count += 1
@@ -122,6 +131,8 @@ class RadarService:
                         self.dev.close()
                         continue
                     with self.lock:
+                        self.scene = RadarScene(self.dev.range_axis(512), self.dev.wavelength,
+                                                getattr(self.dev,'rx_calibration',None), 299792458/(2*self.dev.bandwidth))
                         self.eng.buf.clear()
                         self.eng._acc, self.eng._acc_t = [], []
                         if self.eng.adaptive:
@@ -141,7 +152,13 @@ class RadarService:
             self.report = r
             if self.contract_file:
                 try:
-                    write_atomic(self.contract_file, contract_payload(r, time.time(), online=not self.error))
+                    payload = contract_payload(r, time.time(), online=not self.error)
+                    payload['watch_range_m'] = self.eng.near
+                    payload['assessment'] = {'state':r.get('state'),'signal':'motion' if r.get('kind')=='moving' else 'micro_motion' if r.get('state')=='candidate_present' else None,'valid':bool(r.get('valid'))}
+                    with self.lock:
+                        scene = self.scene.snapshot(time.time(), r.get('range_m') if r.get('state')=='candidate_present' else None) if not self.error and not self.scene_error else None
+                    if scene: payload['scene'] = scene
+                    write_atomic(self.contract_file, payload)
                     self.contract_error = None
                 except OSError as e:
                     self.contract_error = f"{type(e).__name__}: {e}"
@@ -188,7 +205,7 @@ class RadarService:
         return dict(ok=True, path=self.rec_path, frames=self.rec_count)
 
     def status(self) -> dict:
-        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in, reconnects=self.reconnects,
+        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in, reconnects=self.reconnects, scene_error=self.scene_error,
                     recording=dict(path=self.rec_path, frames=self.rec_count) if self.rec else None,
                     contract=dict(file=self.contract_file, error=self.contract_error),
                     disclaimer="Experimental 24 GHz radar sensing. CANDIDATE indications for a human to verify; "
@@ -227,6 +244,18 @@ def make_http(svc: RadarService, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer(("127.0.0.1", port), H)
 
 
+def start_device(device, wait=time.sleep):
+    """Cold boot can leave USB queued. Retry without requiring a page/server restart."""
+    failures=0
+    while True:
+        try:return device.start()
+        except Exception as error:
+            device.close()
+            delay=(3,10,30,60)[min(failures,3)];failures+=1
+            print('radar startup retry:',type(error).__name__,'in',delay,'s',flush=True)
+            wait(delay)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--http-port", type=int, default=3101)
@@ -240,7 +269,13 @@ def main(argv=None):
     a = ap.parse_args(argv)
     from tinyrad_dev import TinyRadDevice
     os.makedirs(os.path.dirname(a.cal), mode=0o700, exist_ok=True)
-    dev = TinyRadDevice().start()
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    dev = TinyRadDevice()
+    try: start_device(dev)
+    except KeyboardInterrupt:
+        dev.close()
+        return
     contract = None if a.contract_file == "none" else a.contract_file
     if contract:
         os.makedirs(os.path.dirname(contract), mode=0o2775, exist_ok=True)
