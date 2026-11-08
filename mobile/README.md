@@ -11,12 +11,13 @@ images fit completely in portrait and landscape; they are never cropped to fill.
 Black bars preserve the original aspect ratio. The views have no frame borders.
 
 - **Camera boxes:** white corner brackets labelled `CAM person`, from local
-  OpenCV NanoDet inference. Only the person class is used. Boxes are burned onto
-  the exact image that was analysed, avoiding overlays drifting over a newer frame.
-  `Boxes` switches to annotated video; `Live` switches to the faster original video.
-  Detection is asynchronous, has one shared camera reader, and never queues old
-  images. Capture age includes processing time; stale detections clear after 1 s.
-  If the detector is missing or fails, raw video remains available.
+  OpenCV NanoDet inference. Live and Boxes share the full-rate raw camera stream;
+  Boxes adds a separate SVG overlay. Video remains ~23 FPS while detector updates
+  arrive ~4–5 times/s. `23 FPS · BOX 5` reports both rates. Positions may briefly
+  lag the person/camera; stale observations clear after 450 ms including network
+  time, on camera loss or on resolution changes. This is not exact-frame alignment.
+  There is one shared camera reader and no inference backlog. The previous exact-
+  frame annotated endpoint remains available for diagnostics.
 - **Radar evidence:** an amber `Radar candidate ~N m` cue appears separately on the
   camera view, with range-only rings in the radar pane. TinyRad's current processing
   measures range, **not azimuth**. It cannot locate a return at a camera pixel or on
@@ -152,5 +153,19 @@ encoded-stream rates are reported separately as `camera.fps` and `camera.stream_
 with actual `camera.resolution`. Person Boxes remains an opt-in, slower exact-frame
 analysis view. A 1080p30-capable camera is required for real 1080p30 capture.
 
-The main camera label reports measured FPS for the selected Live or Boxes stream;
+The main camera label reports measured video FPS plus BOX update Hz when enabled;
 LiDAR uses Hz for scan rate. FPS is not the nominal camera setting.
+
+## Smooth Boxes overlay
+
+Live and Boxes now share the same full-rate `/api/camera.mjpg` stream. Toggling
+Boxes never reconnects or changes the video source. Recent camera detections are
+drawn as a separate SVG aligned to the complete letterboxed image. Detector
+updates remain asynchronous (~4–5 Hz); `LIVE 23 FPS · BOX 5` distinguishes video
+cadence from box updates. Positions can briefly lag moving people or the camera;
+this overlay is not exact-frame synchronised. Camera-derived boxes clear once
+observation age plus network/display time reaches 450 ms, on camera loss, or on
+resolution mismatch. Radar never creates an image box. The older exact-frame
+annotated endpoint remains available for diagnostics only.
+
+Run `node tests/test_person_overlay.js` for geometry/freshness checks.

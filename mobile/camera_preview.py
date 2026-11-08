@@ -466,7 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         allowed = {'/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css',
-                   '/drive.js': 'drive.js', '/control.js': 'control.js', '/lidar.js': 'lidar.js', '/evidence.js': 'evidence.js', '/cloud3d.js': 'cloud3d.js', '/cloud_codec.mjs': 'cloud_codec.mjs',
+                   '/drive.js': 'drive.js', '/control.js': 'control.js', '/lidar.js': 'lidar.js', '/evidence.js': 'evidence.js', '/person_overlay.js': 'person_overlay.js', '/cloud3d.js': 'cloud3d.js', '/cloud_codec.mjs': 'cloud_codec.mjs',
                    '/vendor/three/three.module.js': 'vendor/three/three.module.js',
                    '/vendor/three/three.core.js': 'vendor/three/three.core.js',
                    '/vendor/three/OrbitControls.js': 'vendor/three/OrbitControls.js', '/live.js': 'live.js', '/manifest.webmanifest': 'manifest.webmanifest',

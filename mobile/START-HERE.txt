@@ -5,7 +5,7 @@ Driving is enabled. Left stick moves; right stick turns. Release to stop.
 
 Camera, LiDAR and Radar start automatically and stay on together.
 Tap a preview to change the main view; Camera returns to the live image.
-Live is the faster original video. Boxes enables slower exact-frame person analysis.
+Live is the faster original video. Boxes adds recent person detections over the same full-rate video.
 The attached camera only supports 640x480; measured Live ~22.7 fps (30 fps mode).
 
 Pi: cd /srv/team28/wavesense-mobile && ./start.sh
