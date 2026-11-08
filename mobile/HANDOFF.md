@@ -1,5 +1,18 @@
 # WaveSense teammate handoff — 2026-11-08
 
+
+## Bio Radar overlay (branch `bio-radar/camera-overlay`)
+
+A **Bio Radar** button on the right of the camera view shows or hides an orange/magma blob where the radar has a candidate. It supersedes the earlier "no radar silhouettes on camera" rule at the team's request.
+
+- The button only shows or hides the drawing. The radar keeps running: restarting it means about 25 s of relearning, and a radar start has tripped USB over-current before.
+- `radar_bearing.py` estimates one azimuth from the clutter-removed signal and is published as `tracks[].bearing_deg`. If no direction can be measured, a wide faint band labelled "Direction unknown" is drawn rather than a guessed position. Blobs are hidden when the radar is offline or paused while driving.
+- Shape and height are assumed: the radar has no elevation or pose. One blob is drawn (the strongest candidate).
+- **Direction needed the factory RX correction, which never loaded under NumPy 2.** ADI's `BrdGetCalDat` computes `uint8 << 24` and loses the upper bytes, so `tinyrad_dev.py` now reads the EEPROM bytes itself. Measured on this board 2026-11-08: loaded, `[0.956+0.196j, 1.296-0.054j, 0.964+0.007j, 1+0j]`.
+- **Unverified:** left/right sign, zero offset against the camera, camera field of view (70 deg placeholder). Set `CALIBRATION` at the top of `bio_radar.js` from a person standing at known positions; no restart is needed for that file.
+- **Measured on recordings only:** seated person in the open, bearing p10..p90 of 4..9 deg over 57/57 candidate seconds, 0/59 candidate seconds in the empty minute. Through a wooden door it is withheld more often and far less steady (up to -23..20 deg within a minute); the person's true position was not logged.
+- A blob is a place to check, not a confirmed person. No blob is not an all-clear. 24 GHz passes wood and drywall but not concrete or rubble.
+
 ## Current app
 
 Phone: http://100.99.36.78:8080/ (Tailscale). Canonical app: `/srv/team28/wavesense-mobile`.

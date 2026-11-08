@@ -14,7 +14,7 @@ The wifi-xray receiver (port 3100) includes this status in its own when it is ru
 
 It also writes the WaveSense phone app's radar contract (schema 1) once a second, replacing the
 file atomically (default /srv/team28/runtime/radar/status.json; point the app at it with
-`--radar-status-file`). Range only: bearing_deg stays null until angle is measured.
+`--radar-status-file`). bearing_deg is sensor-local and null whenever no direction can be measured.
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+from radar_bearing import estimate_bearing  # noqa: E402
 from radar_engine import RadarCalibration, RadarEngine  # noqa: E402
 from radar_recovery import RecoveryBackoff
 from radar_scene import RadarScene
@@ -43,11 +44,11 @@ def contract_payload(report: dict, now: float, online: bool = True) -> dict:
     """WaveSense radar contract, schema 1 (wavesense-mobile/README.md, 'Radar teammate contract').
     candidate_present -> 'motion' if moving else 'candidate'; no_candidate -> 'clear'; anything else
     (calibrating, uncalibrated, warming up, no data) -> 'not_judging'. One track per candidate, at the
-    strongest range; bearing_deg is None because no angle is measured."""
+    strongest range; bearing_deg is None unless a direction was measured for it."""
     st = report.get("state")
     if st == "candidate_present":
         state = "motion" if report.get("kind") == "moving" else "candidate"
-        tracks = [{"range_m": float(report["range_m"]), "bearing_deg": None}] if report.get("range_m") is not None else []
+        tracks = [{"range_m": float(report.get("track_range_m", report["range_m"])), "bearing_deg": report.get("bearing_deg")}] if report.get("range_m") is not None else []
     elif st == "no_candidate":
         state, tracks = "clear", []
     else:
@@ -89,6 +90,7 @@ class RadarService:
         self.scene = RadarScene(device.range_axis(512), device.wavelength,
                                 getattr(device,'rx_calibration',None), 299792458/(2*device.bandwidth))
         self.scene_error = None
+        self.bearing_error = None
         self.lock, self.stop = threading.Lock(), threading.Event()
         self.report: dict = dict(state="starting")
         self.rec = None
@@ -140,11 +142,42 @@ class RadarService:
                     print(time.strftime("%T"), "radar reopened; awaiting frames", flush=True)
                     break
 
+    def bearing_at(self, now: float, seconds: float, range_m: float, cal) -> dict | None:
+        samples = self.eng.slow_time(now, seconds, range_m)
+        return None if samples is None else estimate_bearing(samples, cal, self.dev.wavelength)
+
+    def add_bearing(self, report: dict) -> None:
+        """Adds the candidate's direction to the report when it can be measured. Best effort: a
+        bearing failure must never cost the range detection.
+
+        The engine's strongest bin is judged against its own background, so it can be a multi-bounce
+        echo (seen live at exactly twice a person's range). Echoes have no single direction. When that
+        bin yields none, the candidate with the most moving power is tried, and the track follows it."""
+        cal = getattr(self.dev, "rx_calibration", None)
+        if cal is None or report.get("state") != "candidate_present" or report.get("range_m") is None:
+            return
+        try:
+            seconds = RadarEngine.MOTION_S if report.get("kind") == "moving" else RadarEngine.PRES_S
+            result = self.bearing_at(report["t"], seconds, report["range_m"], cal)
+            if result is None:
+                other = self.eng.strongest_range(report["t"], seconds, report.get("candidate_ranges_m") or [])
+                if other is not None and abs(other - report["range_m"]) > 0.31:
+                    result = self.bearing_at(report["t"], seconds, other, cal)
+                    if result:
+                        result["track_range_m"] = round(other, 2)
+            self.bearing_error = None
+        except Exception as error:
+            self.bearing_error = type(error).__name__
+            return
+        if result:
+            report.update(result)
+
     def assess_loop(self) -> None:
         while not self.stop.wait(1.0):
             try:
                 with self.lock:
                     r = self.eng.assess(time.time())
+                    self.add_bearing(r)
             except Exception as e:                  # never let the status (and the app file) go stale
                 r = dict(state="no_data", valid=False, detail=f"engine error: {type(e).__name__}: {e}", t=time.time())
             if self.error:
@@ -205,11 +238,11 @@ class RadarService:
         return dict(ok=True, path=self.rec_path, frames=self.rec_count)
 
     def status(self) -> dict:
-        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in, reconnects=self.reconnects, scene_error=self.scene_error,
+        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in, reconnects=self.reconnects, scene_error=self.scene_error, bearing_error=self.bearing_error,
                     recording=dict(path=self.rec_path, frames=self.rec_count) if self.rec else None,
                     contract=dict(file=self.contract_file, error=self.contract_error),
                     disclaimer="Experimental 24 GHz radar sensing. CANDIDATE indications for a human to verify; "
-                               "range only, no count, not validated for life-safety use.")
+                               "range and an approximate direction, no count, not validated for life-safety use.")
 
 
 def make_http(svc: RadarService, port: int) -> ThreadingHTTPServer:

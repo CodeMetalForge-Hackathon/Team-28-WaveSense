@@ -40,6 +40,7 @@
     mountMini(current);
     SensorEvidence.update(app,status);
     PersonOverlay.update(status,analysisEnabled);
+    BioRadar.update(app,status);
     if(status?.lidar?.mode!=='3d')LidarView.update(app,status?.lidar);else window.CloudView?.bind(app,status?.lidar);const sensor=current==='rgb'?'camera':current==='ir'?'thermal':current;const tag=app.querySelector('.viewport .demo-tag');if(tag){const source=sensor==='wifi'?status?.radar:status?.[sensor];const rate=sensor==='camera'?source?.stream_fps:sensor==='thermal'?source?.stream_fps:sensor==='lidar'?source?.fps:null;tag.textContent=source?.online?(Number.isFinite(rate)?Math.round(rate)+(sensor==='lidar'?' Hz':' FPS'):'●'):'○'}
   }
   function paintAvailability(){if(!live)return;const state=control.state();command.textContent=state.error?'Connection lost':status?.control?.enabled===false?'View only':state.armed?'Driving':state.available?'Ready':'Connecting';}
