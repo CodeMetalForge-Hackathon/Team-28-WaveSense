@@ -132,6 +132,45 @@ class RadarAdaptive(unittest.TestCase):
         self.assertEqual(run(e, rng, 40, 42)[-1]["state"], "learning")
 
 
+class Reconnect(unittest.TestCase):
+    def test_service_reopens_the_radar_after_a_usb_error(self):
+        import tempfile, threading, time as _t
+        from radar_service import RadarService
+
+        class FlakyDevice:
+            def __init__(self):
+                self.starts, self.closes = 0, 0
+            def range_axis(self, nfft):
+                return DEV.range_axis(nfft)
+            def start(self):
+                self.starts += 1
+                return self
+            def close(self):
+                self.closes += 1
+            def frames(self, stop):
+                rng = np.random.default_rng(self.starts)
+                for k in range(40):
+                    if self.starts == 1 and k == 20:
+                        raise OSError(5, "Input/Output Error")          # like the 03:25 USB drop
+                    yield _t.time(), frame(k / RATE, rng)
+                while not stop.is_set():
+                    _t.sleep(0.05)
+                    yield _t.time(), frame(_t.time(), rng)
+
+        d = tempfile.mkdtemp()
+        dev = FlakyDevice().start()
+        svc = RadarService(dev, os.path.join(d, "cal.json"), d, 2.0, os.path.join(d, "status.json"))
+        th = threading.Thread(target=svc.acquire, daemon=True)
+        th.start()
+        deadline = _t.time() + 10
+        while (dev.starts < 2 or svc.error) and _t.time() < deadline:
+            _t.sleep(0.1)
+        svc.stop.set()
+        th.join(3)
+        self.assertEqual((svc.reconnects, dev.starts, dev.closes), (1, 2, 1))
+        self.assertIsNone(svc.error)
+
+
 class Contract(unittest.TestCase):
     """The WaveSense phone app's radar file (schema 1)."""
 

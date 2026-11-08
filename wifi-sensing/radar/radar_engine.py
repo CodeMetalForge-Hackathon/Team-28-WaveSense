@@ -145,6 +145,8 @@ class RadarEngine:
         f = np.abs(np.fft.fftfreq(len(T), 1 / rate))
         band = (f >= self.PRES_BAND[0]) & (f <= self.PRES_BAND[1])
         m = T >= now - self.PRES_S                              # presence: last PRES_S seconds only
+        if m.sum() < 0.7 * self.PRES_S * 10:                    # a gap (e.g. USB reconnect): not judgeable
+            return None
         dp = X[m] - X[m].mean(axis=0, keepdims=True)
         Pp = np.abs(np.fft.fft(dp * np.hanning(m.sum())[:, None, None], axis=0)) ** 2
         fp = np.abs(np.fft.fftfreq(int(m.sum()), 1 / rate))

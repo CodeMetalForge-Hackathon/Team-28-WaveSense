@@ -89,23 +89,50 @@ class RadarService:
         self.rec = None
         self.rec_path, self.rec_count = None, 0
         self.error = None
+        self.reconnects = 0
         self.contract_file, self.contract_error = contract_file, None
 
     def acquire(self) -> None:
-        try:
-            for t, frame in self.dev.frames(self.stop):
-                with self.lock:
-                    self.eng.feed(t, frame)
-                    if self.rec:
-                        self.rec.write(REC.pack(t, *frame.shape) + frame.astype("<i2").tobytes())
-                        self.rec_count += 1
-        except Exception as e:                      # USB unplugged, etc.
-            self.error = f"{type(e).__name__}: {e}"
+        """Read frames forever. On a USB error (unplugged, power dip, re-enumeration) close the device,
+        wait, and reopen it; the scene is then relearned, since gain and phase may have changed."""
+        while not self.stop.is_set():
+            try:
+                for t, frame in self.dev.frames(self.stop):
+                    with self.lock:
+                        self.eng.feed(t, frame)
+                        if self.rec:
+                            self.rec.write(REC.pack(t, *frame.shape) + frame.astype("<i2").tobytes())
+                            self.rec_count += 1
+            except Exception as e:
+                self.error = f"{type(e).__name__}: {e}"
+                self.reconnects += 1
+                print(time.strftime("%T"), "radar error:", self.error, "- reconnecting", flush=True)
+                self.dev.close()
+                # back off: re-starting the radar draws a current surge, and on 2026-11-08 a radar start
+                # tripped the Pi's USB over-current protection and dropped the lidar and camera too
+                delays = iter([3.0, 10.0, 30.0])
+                while not self.stop.wait(next(delays, 60.0)):
+                    try:
+                        self.dev.start()
+                    except Exception as e2:
+                        self.error = f"reconnecting: {type(e2).__name__}: {e2}"
+                        continue
+                    with self.lock:
+                        self.eng.buf.clear()
+                        self.eng._acc, self.eng._acc_t = [], []
+                        if self.eng.adaptive:
+                            self.eng.reset_background()
+                    self.error = None
+                    print(time.strftime("%T"), "radar reconnected", flush=True)
+                    break
 
     def assess_loop(self) -> None:
         while not self.stop.wait(1.0):
-            with self.lock:
-                r = self.eng.assess(time.time())
+            try:
+                with self.lock:
+                    r = self.eng.assess(time.time())
+            except Exception as e:                  # never let the status (and the app file) go stale
+                r = dict(state="no_data", valid=False, detail=f"engine error: {type(e).__name__}: {e}", t=time.time())
             if self.error:
                 r = dict(state="no_data", valid=False, detail=f"radar stopped: {self.error}", t=time.time())
             self.report = r
@@ -158,7 +185,7 @@ class RadarService:
         return dict(ok=True, path=self.rec_path, frames=self.rec_count)
 
     def status(self) -> dict:
-        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in,
+        return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in, reconnects=self.reconnects,
                     recording=dict(path=self.rec_path, frames=self.rec_count) if self.rec else None,
                     contract=dict(file=self.contract_file, error=self.contract_error),
                     disclaimer="Experimental 24 GHz radar sensing. CANDIDATE indications for a human to verify; "
@@ -220,7 +247,11 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # stop cleanly
     for target in (svc.acquire, svc.assess_loop, httpd.serve_forever):
         threading.Thread(target=target, daemon=True).start()
-    print(f"radar: TinyRad sw {dev.version()}; HTTP 127.0.0.1:{a.http_port}; near zone <= {a.near_range_m} m; "
+    try:
+        version = dev.version()
+    except Exception as e:
+        version = f"unknown ({type(e).__name__})"
+    print(f"radar: TinyRad sw {version}; HTTP 127.0.0.1:{a.http_port}; near zone <= {a.near_range_m} m; "
           f"{'adaptive background' if svc.eng.adaptive else 'fixed calibration'}", flush=True)
     try:
         while True:

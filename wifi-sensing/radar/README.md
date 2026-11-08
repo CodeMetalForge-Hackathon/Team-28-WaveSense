@@ -35,7 +35,7 @@ echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="064b", ATTR{idProduct}=="7823", MODE="0
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Plug the radar into a USB 2.0 port; a powered hub is better, since this Pi has had power cuts.
+**Power: put the radar on a powered USB hub.** On 2026-11-08 at 03:28, starting the radar while the C1 lidar and the camera were running tripped the Pi's USB over-current protection (kernel: `over-current change` on four ports). All three sensors dropped at once, although the Pi's own 5 V stayed at 5.03 V with no throttling. The 03:25 radar drop right after the robot app restarted (lidar spin-up) was most likely the same. The Pi's USB ports share one current limit; the radar, the lidar's motor and the camera together exceed it at start-up. The service now reconnects by itself, backing off 3/10/30/60 s.
 
 ## Adaptive background (default since 2026-11-08)
 
