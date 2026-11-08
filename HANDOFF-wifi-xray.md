@@ -22,7 +22,7 @@ The user wants autonomous work and **constant pushes to GitHub**. They will fix 
 | RuView source (read-only reference) | `~/ruview-source`. Server: `v2/crates/wifi-densepose-sensing-server/src/main.rs` |
 | Logs | `~/missions/power.log` (power logger), `~/missions/xray-receiver.log` |
 
-Commits on the branch: `9a1edf8` false-"live" fix → `2080e0b` engine → `2e44410` tests and SNR fix → `eb817e5` receiver → `16761b8` `--udp-loopback` → `e45cda5` evaluate → `fc7e736` README.
+Commits on the branch: `9a1edf8` false-"live" fix → `2080e0b` engine → `2e44410` tests and SNR fix → `eb817e5` receiver → `16761b8` `--udp-loopback` → `e45cda5` evaluate → `fc7e736` README → `aed7ee9` this handoff → `2544267` `scripts/esp32_log.py` → `8ba612d` link hints in status, `fusion.py` (two links must agree). `git log` has the rest.
 
 Commit identity, no global git config:
 
@@ -50,14 +50,16 @@ docker start ruview-live
 cd ~/Team-28-wifi-xray/wifi-sensing && nohup python3 -m xray.receiver --iface wlan1 --forward 127.0.0.1:5006 > ~/missions/xray-receiver.log 2>&1 &
 ```
 
-## BLOCKER: the ESP32 can't see the hotspot
+## BLOCKER: the ESP32 can't see the hotspot (updated 2026-11-07 20:30)
 
-The ESP32 serial log says `WiFi disconnected, reason=201 rssi=-128` (`NO_AP_FOUND`) and retries every 30 s. The hotspot adapter comes up at **`txpower 3.00 dBm`** after every boot (`iw dev wlan1 info`); the regulatory limit allows 30 dBm. The user saw ForgeCSI from `wlan0`.
+Run `python3 wifi-sensing/scripts/esp32_log.py` to see the node's state. It reads without resetting, masks MACs and secrets, and explains the reason code. `status.json` `link.hint` says the same in one line.
 
-- **Fix, needs the user's sudo, every boot:** `sudo iw dev wlan1 set txpower fixed 2000`
-- **Persistent fix, to propose to the user (root):** an executable NetworkManager dispatcher script `/etc/NetworkManager/dispatcher.d/90-forgecsi-txpower` that runs that command when `wlan1` comes up.
-- You cannot `sudo`, and `nmcli up` / `wifi rescan` are "not authorized". Ask the user to run root commands in their own terminal.
-- To read the ESP32 log safely (no reset): open `/dev/ttyACM0` with `os.open(O_RDONLY|O_NONBLOCK|O_NOCTTY)` and raw termios with HUPCL cleared, and never touch DTR/RTS. pyserial's open hung once. Mask MACs and any password-like fields.
+- **Measured:** `reason=201` (NO_AP_FOUND) on every 30 s retry since the 20:00 boot (attempt 56 at 20:30). The hotspot has 0 associated stations (`iw dev wlan1 station dump`).
+- **Measured:** while unassociated, the node captures on fallback channel 1, and every logged frame is at **-92 to -94 dBm**. The Pi's `wlan0` lists the venue's channel-1 AP at 85% (NetworkManager, app output). **Inferred:** antenna, placement or shielding problem on the node. Not verified.
+- **The 3 dBm theory is probably wrong.** `iw` still says `txpower 3.00 dBm` after the user ran `sudo iw dev wlan1 set txpower fixed 2000` (20:19). On mt7921 drivers 3.00 dBm is a known reporting bug: it is what the driver prints when it has no power figure, and `set txpower fixed` can succeed without changing it. So the real power is unknown. Don't push the dispatcher-script fix unless new evidence points back at power.
+- **Asked the user (20:25), no answer yet:** does a phone next to the Pi see `ForgeCSI`, and how strongly? Does node 1 have its antenna fitted (a "-1U" module needs an external U.FL antenna)? How far is it from the Panda adapter?
+- `/dev/ttyUSB0` (CP2102N) is the robot's **RPLIDAR C1**, not the second ESP32. Leave it alone.
+- You cannot `sudo` on your own initiative (`sudo -n` may succeed while the user's timestamp is cached; don't use it without their OK). `nmcli up` / `wifi rescan` are "not authorized".
 
 ## Other open problems
 

@@ -38,7 +38,9 @@ ESP32-C5 node ──Wi-Fi CSI UDP──▶ wifi-xray front door ──same datag
 | `dsp.py` | resampling, per-frame normalisation (cancels automatic gain steps), Hampel filter, motion energy, breathing-like periodicity, profile distance |
 | `engine.py` | calibration, thresholds (multiples of the calibration's own 95th percentiles, with floors), hysteresis, the CANDIDATE report |
 | `receiver.py` | UDP front door: hotspot-subnet allowlist, unchanged forwarding to RuView, engine, recorder, loopback HTTP |
+| `fusion.py` | zone summary across nodes: CANDIDATE only when two judging links agree; one link of several gives a WEAK candidate |
 | `evaluate.py` | replay labelled recordings and **measure** false-candidate and detection rates |
+| `../scripts/esp32_log.py` | read a node's serial console without resetting it; explains why it is not streaming |
 
 It needs `python3-numpy`, which ships with Raspberry Pi OS. The shell tooling stays standard-library only.
 
@@ -53,6 +55,14 @@ python3 -m xray.receiver --iface wlan1 --forward 127.0.0.1:5006
 # 3. status: forward port 3100 in VS Code and open http://localhost:3100
 curl -s 127.0.0.1:3100/status.json
 ```
+
+`status.json` holds `link` (counters, `stations` associated with the hotspot, `last_frame_age_s`, and `hint`: why no CSI is arriving, in plain words), `zone` (the fused summary, see `fusion.py`) and `nodes` (one engine report per ESP32).
+
+### When no CSI arrives
+
+1. `curl -s 127.0.0.1:3100/status.json` and read `link.hint`.
+2. `python3 scripts/esp32_log.py` reads the node's console for 40 s **without resetting it**, and translates the Wi-Fi disconnect reason. It accepts only `/dev/ttyACM*` by default (`/dev/ttyUSB0` on this Pi is the robot lidar).
+3. `reason=201` (NO_AP_FOUND) means the node hears no AP with its SSID on any channel. Check in this order: the SSID shows up on a phone next to the Pi (the hotspot really beacons); the node's antenna is fitted; the node is close to the Panda adapter; the provisioned SSID matches.
 
 ### Calibrate on site, with the crowd present
 
@@ -84,12 +94,13 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 
 ## Known issues (2026-11-07)
 
-- The hotspot adapter (mt7921u) comes up at **3 dBm transmit power** after every boot, and the ESP32 then logs `reason=201` (no AP found). Fix per boot: `sudo iw dev wlan1 set txpower fixed 2000`. A persistent NetworkManager dispatcher hook is still to be added (needs root).
+- **Node 1 has never joined the hotspot since the 20:00 boot.** Measured from its console (`esp32_log.py`, 20:30): `reason=201` NO_AP_FOUND on every retry (attempt 56), and the hotspot shows 0 associated stations. While unassociated, the node captures CSI on its fallback channel 1, and every logged frame there is at **-92 to -94 dBm** (measured). The Pi's own `wlan0` lists the venue's channel-1 AP at 85% signal (app output, NetworkManager). That gap points to the node's antenna, placement or shielding (**inferred, not verified**). Next check: does a phone next to the Pi see `ForgeCSI`, and does the node have its antenna?
+- `iw dev wlan1 info` reports **`txpower 3.00 dBm`**, even after `sudo iw dev wlan1 set txpower fixed 2000` (20:19). On mt7921 drivers this figure is a known reporting bug: it is what the driver prints when it has no power value, and `set txpower fixed` can succeed without changing it. So the real transmit power is **unknown**, and probably normal. It is no longer the main suspect.
 - The Pi lost power repeatedly (power-on resets, `rsts=0x1000`) with a 5 A wall supply and no prior voltage sag. The supply or its connection is suspect.
 
 ## Next steps
 
 1. Get real recordings and fill in the results table. Tune the thresholds from `evaluate.py`, not by eye.
-2. **Second ESP32 as node 2.** Two links seen from different angles cut false candidates from background motion, and the near zone becomes where the two links agree.
+2. **Second ESP32 as node 2.** Two links seen from different angles cut false candidates from background motion, and the near zone becomes where the two links agree. The fusion logic is in place (`fusion.py`, tested on synthetic reports only); it needs the second node provisioned with `--node-id 2`.
 3. Optional trained 0/1/2 occupancy classifier, only reported once its measured accuracy is shown next to it.
 4. Show the status in the WaveSense phone UI (its Wi-Fi tile), with the same CANDIDATE wording.
