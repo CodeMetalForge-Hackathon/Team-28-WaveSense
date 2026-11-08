@@ -34,3 +34,6 @@ logs/
 venv/
 __pycache__/
 *.pyc
+
+# wifi-xray recordings and calibrations: RF data from people, never commit
+*.csirec
