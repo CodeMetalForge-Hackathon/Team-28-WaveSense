@@ -174,3 +174,6 @@ Run `node tests/test_person_overlay.js` for geometry/freshness checks.
 
 Maximum-speed slider: see HANDOFF.md. Run `node tests/test_responsive_control.js`
 for bounded-request, reversal, neutral-priority and combined speed-cap regressions.
+
+Speed/reaction follow-up: protocol 4 uses server-side usable duty limits, default
+100%, and five-second stopped connection reuse. See the final HANDOFF.md section.

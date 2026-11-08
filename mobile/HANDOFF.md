@@ -63,3 +63,23 @@ latency still apply. No automatic arming or movement on reconnect.
 Validation: existing control transport tests, new responsive-transport/speed-cap
 tests, and three local HTTP tests with fake motors passed. Slider UI was checked
 with an explicitly synthetic preview. No robot wheel movement was commanded.
+
+## Follow-up: real speed cap and motor readiness
+
+This supersedes the earlier 50% default and command-only mapping. The old slider
+only varied duty between 35 and 40, and every release reopened the motor connection
+on the next touch. Protocol 4 now carries the selected speed to the server.
+Full stick maps 25%→38.75 duty, 50%→42.5, 100%→50, within the chassis/board hard
+limit; 0% stops. Actual ground speed remains uncalibrated. The default is now 100%,
+using a new preference key so an old saved 50% does not silently persist.
+
+Normal release sends immediate chassis STOP and invalidates the lease, while
+keeping the zero-speed connection ready for five seconds. It is reused only with
+a healthy deadman and fresh battery telemetry. Idle expiry, camera loss, faults,
+watchdog and server shutdown close it. Initial centre contact begins zero-speed
+readiness; movement still requires stick deflection. The 120 ms reversal brake
+and 300 ms control watchdog remain. Old protocol-3 pages must refresh.
+
+Checked with fake motors/serial only: real PWM-cap mapping, healthy connection
+reuse, lease invalidation, zero stop, idle expiry, camera-loss close and rejection
+of commands exceeding the selected limit. No physical drive test was performed.

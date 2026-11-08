@@ -28,5 +28,7 @@ const settle=()=>new Promise(r=>setImmediate(r));
  assert.equal(DriveMath.speedLimit(-10),0);assert.equal(DriveMath.speedLimit(200),.35);
  assert.deepEqual(DriveMath.motion({x:1,y:1},{x:1},0,false),{vx:-0,vy:-0,wz:-0});
  assert(DriveMath.vector(.07,0).x>0,'small deliberate finger input ignored');assert.equal(DriveMath.vector(.02,0).x,0);
+ let payloads=[];const meta=new RobotControl({minInterval:0,hasIntent:()=>true,post:(url,data)=>{payloads.push({url,data});return Promise.resolve({lease:'speed'})}});meta.setAvailable(true);meta.input({vx:.175,vy:0,wz:0,max_speed:50});await settle();assert.equal(payloads.find(x=>x.url==='/api/drive').data.max_speed,50);meta.input({vx:0,vy:0,wz:0,max_speed:0});assert.equal(payloads.at(-1).data.max_speed,0);meta.release();
+ let contact=[];const center=new RobotControl({hasIntent:()=>true,post:(url,data)=>{contact.push({url,data});return Promise.resolve({lease:'center'})}});center.setAvailable(true);center.input({vx:0,vy:0,wz:0,max_speed:100});await settle();assert(contact.some(x=>x.url==='/api/arm'),'center contact did not prepare zero-speed control');assert(!contact.some(x=>x.url==='/api/drive'&&(x.data.vx||x.data.vy||x.data.wz)),'center contact caused motion');center.release();
  console.log('PASS: immediate reverse, latest-input coalescing, bounded requests, priority stop, fresh leases and combined speed cap');
 })().catch(e=>{console.error(e);process.exitCode=1});

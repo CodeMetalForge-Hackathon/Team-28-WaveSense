@@ -5,17 +5,17 @@ globalThis.RobotControl=class RobotControl{
   this.available=false;this.armed=false;this.lease=null;this.seq=0;this.epoch=0;
   this.inflight=0;this.busy=false;this.pending=null;this.timer=null;
   this.revision=0;this.sentRevision=-1;this.sentAt=-Infinity;
-  this.vector={vx:0,vy:0,wz:0};this.error=null;
+  this.vector={vx:0,vy:0,wz:0,max_speed:100};this.error=null;
  }
  state(){return{available:this.available,armed:this.armed,error:this.error}}
  notify(){this.onState(this.state())}
  neutral(){return Math.abs(this.vector.vx)+Math.abs(this.vector.vy)+Math.abs(this.vector.wz)<1e-7}
  clearTimer(){if(this.timer!==null){this.cancel(this.timer);this.timer=null}}
- setAvailable(ready){if(ready&&!this.available){this.vector={vx:0,vy:0,wz:0};this.onReset()}if(!ready&&this.available){this.available=false;this.release('Connection lost');this.onReset()}else{this.available=ready;this.notify()}}
+ setAvailable(ready){if(ready&&!this.available){this.vector={vx:0,vy:0,wz:0,max_speed:100};this.onReset()}if(!ready&&this.available){this.available=false;this.release('Connection lost');this.onReset()}else{this.available=ready;this.notify()}}
  input(v){
-  const previous=this.vector,wasNeutral=this.neutral();this.vector={vx:v.vx,vy:v.vy,wz:v.wz};++this.revision;this.error=null;
+  const previous=this.vector,wasNeutral=this.neutral();this.vector={vx:v.vx,vy:v.vy,wz:v.wz,max_speed:Number.isFinite(v.max_speed)?v.max_speed:100};++this.revision;this.error=null;
   if(!this.available)return;
-  if(this.neutral()){this.clearTimer();if(this.armed&&!wasNeutral)this.zeroNow();if(!this.hasIntent())this.release();return}
+  if(this.neutral()){this.clearTimer();if(this.armed&&!wasNeutral)this.zeroNow();if(!this.hasIntent())this.release();else if(!this.armed)this.arm();return}
   if(!this.hasIntent())return;
   const reverse=['vx','vy','wz'].some(k=>previous[k]*this.vector[k]<0);
   const slowing=['vx','vy','wz'].reduce((n,k)=>n+Math.abs(this.vector[k])-Math.abs(previous[k]),0)<-1e-7;
@@ -25,7 +25,7 @@ globalThis.RobotControl=class RobotControl{
   if(this.pending||this.armed||!this.available||!this.hasIntent())return;
   const generation=++this.epoch;this.error=null;
   this.pending=(async()=>{try{
-   const result=await this.post('/api/arm',{protocol:3});
+   const result=await this.post('/api/arm',{protocol:4});
    if(generation!==this.epoch||!this.hasIntent()||!this.available){this.post('/api/release',{lease:result.lease}).catch(()=>{});return}
    this.lease=result.lease;this.seq=0;this.armed=true;this.notify();this.flush(true);
   }catch(e){if(generation===this.epoch){this.error=e.message;this.armed=false;this.lease=null;this.onReset();this.notify()}}finally{this.pending=null}})();
@@ -34,7 +34,7 @@ globalThis.RobotControl=class RobotControl{
  tick(){if(!this.available||!this.hasIntent())return;if(this.armed)this.flush();else if(!this.neutral())this.arm()}
  async zeroNow(){
   if(!this.armed)return;
-  this.clearTimer();const generation=this.epoch,payload={vx:0,vy:0,wz:0,seq:++this.seq,lease:this.lease};
+  this.clearTimer();const generation=this.epoch,payload={vx:0,vy:0,wz:0,max_speed:this.vector.max_speed,seq:++this.seq,lease:this.lease};
   this.sentRevision=this.neutral()?this.revision:-1;this.sentAt=this.now();
   try{await this.post('/api/drive',payload)}catch(e){if(e.code!=='stale_command'&&generation===this.epoch)this.fail(e)}
  }
@@ -52,7 +52,7 @@ globalThis.RobotControl=class RobotControl{
  fail(e){this.error=e.message;this.release();this.onReset();this.notify()}
  release(reason=null){
   const owned=this.armed||!!this.pending,lease=this.lease;this.clearTimer();++this.epoch;
-  this.armed=false;this.lease=null;this.inflight=0;this.busy=false;this.vector={vx:0,vy:0,wz:0};
+  this.armed=false;this.lease=null;this.inflight=0;this.busy=false;this.vector={vx:0,vy:0,wz:0,max_speed:100};
   if(reason)this.error=reason;if(owned)this.post('/api/release',{lease}).catch(()=>{});this.notify();
  }
  observe(control,requestEpoch){if(requestEpoch===this.epoch&&this.armed&&!control.mine){this.release('Control ended');this.onReset()}}

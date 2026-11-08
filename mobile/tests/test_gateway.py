@@ -10,7 +10,8 @@ gateway=importlib.util.module_from_spec(spec);spec.loader.exec_module(gateway)
 class FakeMotors:
  def __init__(self):self.commands=[];self.closed=False
  def open(self):self.closed=False
- def send(self,l,a,sideways=0):self.commands.append((l,a,sideways))
+ def send(self,l,a,sideways=0,max_speed=100):self.commands.append((l,a,sideways))
+ def idle(self):self.commands.append((0,0,0))
  def close(self):self.closed=True
  def details(self):return {'moving':False,'deadman_alive':True}
 class GatewayTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class GatewayTests(unittest.TestCase):
    with self.assertRaises(ValueError):self.drive('a',1,value,0)
    with self.assertRaises(ValueError):self.drive('a',1,0,0,value)
  def test_sideways_independent_rotation(self):
-  self.app.arm('a');self.drive('a',1,.1,-.2,.3);self.assertEqual(self.app.motors.commands[-1],(.1,-.2,.3))
+  self.app.arm('a');self.drive('a',1,.05,-.1,.2);self.assertEqual(self.app.motors.commands[-1],(.05,-.1,.2))
  def test_camera_loss_disarms(self):
   self.app.arm('a');self.app.camera_ready=lambda:False
   with self.assertRaises(ValueError):self.drive('a',1,.1,0)
@@ -58,7 +59,7 @@ class GatewayTests(unittest.TestCase):
  def test_late_release_does_not_cancel_new_lease(self):
   old=self.app.arm('a');new=self.app.arm('a');self.app.release('a',old);self.assertEqual(self.app.lease,new)
  def test_release_stops_current_lease(self):
-  lease=self.app.arm('a');self.app.release('a',lease);self.assertIsNone(self.app.owner);self.assertTrue(self.app.motors.closed)
+  lease=self.app.arm('a');self.app.release('a',lease);self.assertIsNone(self.app.owner);self.assertFalse(self.app.motors.closed);self.assertEqual(self.app.motors.commands[-1],(0,0,0))
  def test_late_forward_after_neutral_rejected(self):
   self.app.arm('a');self.drive('a',2,0,0)
   with self.assertRaises(gateway.StaleCommand):self.drive('a',1,.35,0)
@@ -71,3 +72,24 @@ class GatewayTests(unittest.TestCase):
   with patch.object(gateway.time,'monotonic',return_value=102.9):self.assertEqual(self.app.status('a')['evidence']['state'],'paused')
   with patch.object(gateway.time,'monotonic',return_value=103.1):self.assertTrue(self.app.status('a')['evidence']['radar_candidate'])
 if __name__=='__main__':unittest.main()
+
+class WarmMotorSafety(unittest.TestCase):
+ def setUp(self):
+  helper=GatewayTests();helper.setUp();self.app=helper.app
+ def watchdog_once(self):
+  with patch.object(gateway.time,'sleep',side_effect=RuntimeError('end')):
+   with self.assertRaises(RuntimeError):self.app.watchdog()
+ def test_release_zeroes_and_invalidates_lease_while_ready(self):
+  lease=self.app.arm('a');self.app.drive('a',1,.1,0,lease=lease);self.app.release('a',lease)
+  self.assertEqual(self.app.motors.commands[-1],(0,0,0));self.assertIsNone(self.app.owner)
+  self.assertFalse(self.app.motors.closed)
+  with self.assertRaises(ValueError):self.app.drive('a',2,.1,0,lease=lease)
+ def test_idle_timeout_and_camera_loss_close_connection(self):
+  lease=self.app.arm('a');self.app.release('a',lease);self.app.motor_idle_until=gateway.time.monotonic()-1;self.watchdog_once();self.assertTrue(self.app.motors.closed)
+  lease=self.app.arm('a');self.app.release('a',lease);self.app.camera_ready=lambda:False;self.watchdog_once();self.assertTrue(self.app.motors.closed)
+ def test_selected_speed_is_validated_before_sending(self):
+  lease=self.app.arm('a')
+  for speed in [-1,101,float('nan'),True]:
+   with self.assertRaises(ValueError):self.app.drive('a',1,.1,0,lease=lease,max_speed=speed)
+  with self.assertRaises(ValueError):self.app.drive('a',1,.35,0,lease=lease,max_speed=50)
+  self.app.drive('a',1,.175,0,lease=lease,max_speed=50)

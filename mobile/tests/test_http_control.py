@@ -21,15 +21,16 @@ class HttpControl(unittest.TestCase):
  def test_old_cached_ui_cannot_drive(self):
   code,body,_=self.call('POST','/api/arm',{})
   self.assertEqual(code,426);self.assertIsNone(self.app.owner)
+  self.assertEqual(self.call('POST','/api/arm',{'protocol':3})[0],426)
  def test_out_of_order_move_cannot_override_neutral(self):
-  code,body,_=self.call('POST','/api/arm',{'protocol':3});self.assertEqual(code,200);lease=body['lease']
-  self.assertEqual(self.call('POST','/api/drive',{'lease':lease,'seq':2,'vx':0})[0],200)
-  code,body,_=self.call('POST','/api/drive',{'lease':lease,'seq':1,'vx':.35})
+  code,body,_=self.call('POST','/api/arm',{'protocol':4});self.assertEqual(code,200);lease=body['lease']
+  self.assertEqual(self.call('POST','/api/drive',{'lease':lease,'seq':2,'vx':0,'max_speed':100})[0],200)
+  code,body,_=self.call('POST','/api/drive',{'lease':lease,'seq':1,'vx':.35,'max_speed':100})
   self.assertEqual(code,409);self.assertEqual(body['code'],'stale_command');self.assertTrue(all(not any(c) for c in self.app.motors.commands))
   self.assertEqual(self.call('POST','/api/release',{'lease':lease})[0],200)
-  self.assertIsNone(self.app.owner);self.assertTrue(self.app.motors.closed)
+  self.assertIsNone(self.app.owner);self.assertEqual(self.app.motors.commands[-1],(0,0,0))
  def test_spectator_page_cannot_release_driver(self):
-  lease=self.call('POST','/api/arm',{'protocol':3})[1]['lease']
+  lease=self.call('POST','/api/arm',{'protocol':4})[1]['lease']
   spectator=self.call('GET','/api/session',cookie='')[2]['Set-Cookie'].split(';')[0]
   self.call('POST','/api/release',{'lease':lease},cookie=spectator)
   self.assertIsNotNone(self.app.owner)

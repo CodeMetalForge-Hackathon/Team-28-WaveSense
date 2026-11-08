@@ -27,7 +27,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 WATCHDOG = 0.30
-MAX_DUTY = 35.0
+APP_MAX_DUTY = 50.0
 SIGNS = {1: -1, 2: 1, 3: -1, 4: 1}
 
 
@@ -40,11 +40,18 @@ class Motors:
     def __init__(self, port):
         self.port = port
         self.chassis = None
+        self.max_duty = APP_MAX_DUTY
 
     def open(self):
+        if self.chassis:
+            state = self.chassis.status()
+            if not state['error'] and state['deadman_alive'] and state['battery_age_s'] is not None and state['battery_age_s'] < .5:
+                return
+            self.close()
         from robot.chassis import Chassis
-        self.chassis = Chassis(port=self.port, duty_cap=40, watchdog_s=.3,
+        self.chassis = Chassis(port=self.port, duty_cap=APP_MAX_DUTY, watchdog_s=.3,
                                deadman=True, handle_signals=False)
+        self.max_duty = min(APP_MAX_DUTY,self.chassis.duty_cap)
         deadline = time.monotonic() + 1.2
         while time.monotonic() < deadline:
             state = self.chassis.status()
@@ -56,11 +63,21 @@ class Motors:
         self.close()
         raise RuntimeError('Motor board not responding')
 
-    def send(self, linear, angular, sideways=0):
+    def send(self, linear, angular, sideways=0, max_speed=100):
         if self.chassis:
-            self.chassis.set_velocity(vx=linear/.35, vy=sideways/.35, wz=angular/.35)
+            ratio=max_speed/100
+            if ratio<=0:
+                self.chassis.stop('zero speed limit')
+                return
+            cap=min(APP_MAX_DUTY,self.max_duty)
+            floor=min(cap,self.chassis.min_duty)
+            self.chassis.duty_cap=floor+(cap-floor)*ratio
+            self.chassis.set_velocity(vx=linear/.35/ratio, vy=sideways/.35/ratio, wz=angular/.35/ratio)
             if self.chassis.error:
                 raise RuntimeError(self.chassis.error)
+
+    def idle(self):
+        if self.chassis:self.chassis.stop('sticks released')
 
     def close(self):
         if self.chassis:
@@ -158,6 +175,7 @@ class Gateway:
         from person_vision import PersonVision
         self.vision = PersonVision(self.camera, ROOT)
         self.last_motion_at = 0
+        self.motor_idle_until = 0
         from sensor_modes import SensorModes
         self.lidar_enabled = threading.Event()
         self.lidar_running = threading.Event()
@@ -265,18 +283,24 @@ class Gateway:
         _, updated, state = self.camera.snapshot()
         return state == 'live' and time.monotonic() - updated < 1.0
 
-    def disarm(self, reason):
+    def disarm(self, reason, keep_ready=False):
         with self.lock:
             self.owner = None
             self.lease = None
             self.sequence = -1
             self.reason = reason
-            self.motors.close()
+            self.motor_idle_until = 0
+            if keep_ready:
+                try:
+                    self.motors.idle()
+                    self.motor_idle_until = time.monotonic()+5
+                except Exception:self.motors.close()
+            else:self.motors.close()
 
     def release(self, owner, lease):
         with self.lock:
             if self.owner == owner and lease and lease == self.lease:
-                self.disarm('Sticks released')
+                self.disarm('Sticks released',keep_ready=True)
 
     def arm(self, owner):
         with self.lock:
@@ -292,11 +316,12 @@ class Gateway:
             self.owner = owner
             self.lease = secrets.token_urlsafe(16)
             self.last_command = time.monotonic()
+            self.motor_idle_until = 0
             self.sequence = -1
             self.reason = 'Armed'
             return self.lease
 
-    def drive(self, owner, seq, linear, angular, sideways=0, lease=None):
+    def drive(self, owner, seq, linear, angular, sideways=0, lease=None, max_speed=100):
         with self.lock:
             if owner != self.owner or not self.owner or lease != self.lease:
                 raise ValueError('Not armed on this phone')
@@ -307,8 +332,12 @@ class Gateway:
                 raise StaleCommand('Old command rejected')
             if not all(math.isfinite(v) and abs(v) <= .35 for v in (linear, angular, sideways)):
                 raise ValueError('Command exceeds speed limit')
+            if type(max_speed) not in (int,float) or not math.isfinite(max_speed) or not 0<=max_speed<=100:
+                raise ValueError('Invalid maximum speed')
+            if abs(linear)+abs(angular)+abs(sideways) > .35*max_speed/100+1e-7:
+                raise ValueError('Combined command exceeds selected limit')
             try:
-                self.motors.send(linear, angular, sideways)
+                self.motors.send(linear, angular, sideways,max_speed=max_speed)
             except Exception:
                 self.disarm('Motor connection lost')
                 raise ValueError('Motor connection lost')
@@ -321,6 +350,9 @@ class Gateway:
             with self.lock:
                 if self.owner and (time.monotonic() - self.last_command > WATCHDOG or not self.camera_ready()):
                     self.disarm('Control link or camera lost')
+                elif not self.owner and self.motor_idle_until and (time.monotonic()>=self.motor_idle_until or not self.camera_ready()):
+                    self.motor_idle_until=0
+                    self.motors.close()
             time.sleep(.04)
 
     def wifi_poll(self):
@@ -361,7 +393,7 @@ class Gateway:
                                 'driver': self.motors.details(),
                                 'motor_access': os.access(self.args.motor_port, os.R_OK | os.W_OK),
                                 'camera_required': True, 'reason': self.reason,
-                                'watchdog_ms': int(WATCHDOG * 1000), 'max_duty': 40}}
+                                'watchdog_ms': int(WATCHDOG * 1000), 'max_duty': getattr(self.motors,'max_duty',APP_MAX_DUTY)}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -496,12 +528,12 @@ class Handler(BaseHTTPRequestHandler):
             if path in ('/api/sensor-mode','/api/sensor'):
                 return self.send(409, {'error':'Sensors run automatically; refresh the page'})
             if path == '/api/arm':
-                if data.get('protocol') != 3:
+                if data.get('protocol') != 4:
                     return self.send(426, {'error': 'Refresh the operator page', 'code': 'refresh_required'})
                 lease = self.app.arm(session)
                 return self.send(200, {'ok': True, 'lease': lease})
             elif path == '/api/drive':
-                self.app.drive(session, int(data['seq']), float(data.get('vx', data.get('linear', 0))), float(data.get('wz', data.get('angular', 0))), float(data.get('vy', 0)), lease=data.get('lease'))
+                self.app.drive(session, int(data['seq']), float(data.get('vx', data.get('linear', 0))), float(data.get('wz', data.get('angular', 0))), float(data.get('vy', 0)), lease=data.get('lease'),max_speed=data['max_speed'])
             elif path == '/api/release':
                 self.app.release(session, data.get('lease'))
             elif path == '/api/stop':

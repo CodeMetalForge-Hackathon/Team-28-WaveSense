@@ -1,7 +1,7 @@
 /* Finger displacement and maximum command scaling, shared by both sticks. */
 globalThis.DriveMath=Object.freeze({
  vector(x,y){const length=Math.hypot(x,y);if(length<0.06)return{x:0,y:0};return{x:x/Math.max(1,length),y:y/Math.max(1,length)}},
- speedLimit(percent){const n=Number(percent);return .35*Math.max(0,Math.min(100,Number.isFinite(n)?n:50))/100},
+ speedLimit(percent){const n=Number(percent);return .35*Math.max(0,Math.min(100,Number.isFinite(n)?n:100))/100},
  motion(move,turn,limit,latched){
   if(latched)return{vx:0,vy:0,wz:0};
   const vx=-move.y,vy=-move.x,wz=-turn.x;
