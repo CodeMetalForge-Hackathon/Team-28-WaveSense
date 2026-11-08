@@ -14,8 +14,8 @@ How it works
     thresholds are learned for this room and placement
   - a candidate is reported with its range; within near_range_m it counts for the near zone
 
-Limits: one radar gives range (0.6 m resolution) but no angle here, so two people at the same
-distance merge, and the count is not reported. 24 GHz does not pass through concrete or rubble.
+Limits: this engine gives range (0.6 m resolution) only, so two people at the same distance merge,
+and the count is not reported (radar_bearing.py estimates a direction for the strongest candidate). 24 GHz does not pass through concrete or rubble.
 Anything that moves or vibrates (a fan, a swinging cable) can be a candidate. A candidate is
 for a human to verify; no candidate is NOT evidence that nobody is there.
 """
@@ -129,6 +129,25 @@ class RadarEngine:
             w = np.hanning(x.shape[0])[:, None]
             spec = np.fft.rfft(x * w, n=self.NFFT, axis=0)      # (NFFT/2+1, rx)
             self.buf.append((tt, spec[self.bins].astype(np.complex64)))
+
+    def slow_time(self, now: float, seconds: float, range_m: float, half_width_m: float = 0.31) -> np.ndarray | None:
+        """Complex samples (time, bins, rx) for the range bins around range_m over the last seconds."""
+        rec = [s for t, s in self.buf if now - seconds <= t <= now]
+        keep = np.abs(self.r_axis[self.bins] - range_m) <= half_width_m
+        if len(rec) < 5 or not keep.any():
+            return None
+        return np.stack(rec)[:, keep, :]
+
+    def strongest_range(self, now: float, seconds: float, ranges) -> float | None:
+        """Of the given candidate ranges, the one with the most clutter-removed power."""
+        rec = [s for t, s in self.buf if now - seconds <= t <= now]
+        if len(rec) < 5 or not len(ranges):
+            return None
+        x = np.stack(rec)
+        power = (np.abs(x - x.mean(axis=0, keepdims=True)) ** 2).mean(axis=(0, 2))
+        rng = self.r_axis[self.bins]
+        index = sorted({int(np.argmin(np.abs(rng - r))) for r in ranges})
+        return float(rng[index[int(np.argmax(power[index]))]])
 
     # ---- features --------------------------------------------------------------
     def features(self, now: float) -> dict | None:

@@ -12,6 +12,7 @@ installed before import. USB access needs a udev rule for 064b:7823 (see radar/R
 from __future__ import annotations
 
 import os
+import struct
 import sys
 import time
 import types
@@ -32,6 +33,17 @@ def _stub_pyqtgraph() -> None:
     pg.__getattr__ = lambda name: _Any()
     sys.modules.setdefault("pyqtgraph", pg)
     sys.modules.setdefault("pyqtgraph.Qt", qt)
+
+
+def read_factory_calibration(rad, channels: int = 4) -> np.ndarray:
+    """Factory RX correction for TX1, read from the board's EEPROM (read-only).
+
+    Same layout as ADI's BrdGetCalDat: little-endian signed 32-bit re/im pairs scaled by 2**24.
+    BrdGetCalDat itself cannot be used under NumPy 2: its `uint8 << 24` stays uint8, so only the
+    low byte of each word survives and every coefficient comes out near 1e-6."""
+    raw = bytes(int(rad.BrdRdEEPROM(addr)[1][0]) & 0xFF for addr in range(channels * 8))
+    words = struct.unpack(f"<{channels * 2}i", raw)
+    return np.array([complex(words[2 * i], words[2 * i + 1]) / 2**24 for i in range(channels)])
 
 
 class TinyRadDevice:
@@ -97,11 +109,15 @@ class TinyRadDevice:
         self.rad.BrdRst()
         self.rx_calibration = None
         try:
-            factory = np.asarray(self.rad.BrdGetCalDat()['Dat'],dtype=complex)[:4]
-            if factory.shape==(4,) and np.isfinite(factory).all() and np.all((np.abs(factory)>.01)&(np.abs(factory)<100)):
+            factory = read_factory_calibration(self.rad)
+            if np.isfinite(factory).all() and np.all((np.abs(factory)>.01)&(np.abs(factory)<100)):
                 self.rx_calibration = factory
-        except Exception:
-            pass  # Range detection continues; never invent direction without correction.
+                print("radar: factory RX correction loaded:", np.round(factory, 4).tolist(), flush=True)
+            else:
+                print("radar: factory RX correction rejected, direction unavailable:", np.round(factory, 6).tolist(), flush=True)
+        except Exception as error:
+            # Range detection continues; never invent direction without correction.
+            print("radar: factory RX correction unreadable, direction unavailable:", type(error).__name__, flush=True)
         self.rad.RfRxEna()
         self.rad.RfTxEna(self.tx, self.tx_amp)
         self.rad.RfMeas({"fStrt": self.f_start, "fStop": self.f_stop, "TRampUp": self.n * 1e-6, "N": self.n,

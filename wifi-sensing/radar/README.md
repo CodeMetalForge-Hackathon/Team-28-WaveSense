@@ -85,3 +85,13 @@ Point the radar's antenna side at the seats you want to watch, 1–1.5 m away. R
 Results page: `results-2026-11-07.html` (also published as a private claude.ai artifact).
 
 The 10 s presence window and the 5 s hysteresis were chosen after looking at the first recording (a 20 s window took ~35 s to clear). A fresh held-out live test is still to be done.
+
+## Direction (bearing), added 2026-11-08
+
+`radar_bearing.py` estimates one azimuth for the candidate from the clutter-removed slow-time signal, so walls and furniture do not attract it. It returns nothing unless one source dominates. `tracks[].bearing_deg` in the phone contract carries it, sensor-local.
+
+The factory RX correction is read from the EEPROM directly in `tinyrad_dev.py`, because ADI's `BrdGetCalDat` loses the upper bytes of each word under NumPy 2.
+
+- **Measured, replay with this board's factory correction.** Seated person in the open (`radar-empty-one-empty-20261107-2322`): a bearing on 57/57 candidate seconds, p10..p90 4..9 deg; 0/59 candidate seconds in the empty minute.
+- **Measured, replay through a wooden door** (`door-cmd-20261107-234537`): withheld more often and much less steady, up to -23..20 deg within one minute. The person's true position was not logged, so accuracy there is **unverified**.
+- **Unverified:** left/right sign, zero offset against the camera, absolute accuracy, any behaviour through concrete or rubble (24 GHz is not expected to pass them).
