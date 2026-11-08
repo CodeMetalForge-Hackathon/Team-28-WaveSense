@@ -18,6 +18,7 @@ import secrets
 import signal
 import struct
 import threading
+import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -141,7 +142,7 @@ class Gateway:
         self.reason = 'Not armed'
         self.sessions = {}
         self.wifi = {'online': False, 'reason': 'RuView unavailable'}
-        self.lidar = {'online': False, 'reason': 'LiDAR starting'}
+        self.lidar = {'mode':'2d','online': False, 'reason': 'LiDAR off'}
         self.lidar_sensor = None
         self.slam = None
         self.map_feed = None
@@ -150,20 +151,61 @@ class Gateway:
         from person_vision import PersonVision
         self.vision = PersonVision(self.camera, ROOT)
         self.last_motion_at = 0
+        from sensor_modes import SensorModes
+        self.lidar_enabled = threading.Event()
+        self.lidar_running = threading.Event()
+        self.lidar_stopped = threading.Event(); self.lidar_stopped.set()
+        self.sensor_modes = SensorModes(self.start_lidar, self.stop_lidar, ROOT)
 
     def radar_poll(self):
         from radar_status import read_radar
         while True:
-            self.radar = read_radar(self.args.radar_status_file)
+            self.radar = read_radar(self.args.radar_status_file) if self.sensor_modes.mode == "radar" else {"online":False,"tracks":[],"reason":"Radar off"}
             time.sleep(.3)
 
+    def start_lidar(self):
+        self.lidar_stopped.clear()
+        self.lidar_enabled.set()
+        if not self.lidar_running.wait(3): raise RuntimeError("LiDAR worker did not start")
+
+    def stop_lidar(self):
+        self.lidar_enabled.clear()
+        if not self.lidar_stopped.wait(15):
+            raise RuntimeError('LiDAR is still stopping; radar remains off')
+
     def lidar_poll(self):
+        while True:
+            self.lidar_enabled.wait()
+            self.lidar_running.set()
+            try:
+                self.run_lidar()
+            except Exception as e:
+                self.lidar = {'mode':'2d','online':False,'reason':type(e).__name__,'points':[]}
+            finally:
+                if self.cloud: self.cloud.stop(); self.cloud = None
+                if self.slam: self.slam.stop(); self.slam = None
+                if self.lidar_sensor:
+                    sensor = self.lidar_sensor
+                    sensor.stop()
+                    if sensor.alive():
+                        # Never release the interlock while capture is still alive.
+                        while sensor.alive(): time.sleep(.1)
+                    if sensor._closer: sensor._closer.join()
+                    self.lidar_sensor = None
+                self.lidar_enabled.clear()
+                self.lidar = {'mode':'2d','online':False,'reason':'LiDAR off','points':[]}
+                self.map_feed = None
+                self.lidar_running.clear()
+                self.lidar_stopped.set()
+
+    def run_lidar(self):
         if getattr(self.args, 'lidar_mode', '2d') == '3d':
             from livox_sensor import Livox
             self.cloud = Livox(ROOT, ip=self.args.lidar_ip, model=self.args.lidar_model).start()
-            while True:
+            while self.lidar_enabled.is_set():
                 self.lidar = dict(self.cloud.snapshot(), mode='3d', points=[])
                 time.sleep(.2)
+            return
         from sensors.lidar import Lidar
         from robot.proximity import Proximity
         from lidar_map import MapFeed
@@ -177,7 +219,7 @@ class Gateway:
             self.slam = Slam(self.lidar_sensor, map_every_s=1.0).start()
         except Exception as e:
             mapping_error = type(e).__name__
-        while True:
+        while self.lidar_enabled.is_set():
             try:
                 sample = self.lidar_sensor.snapshot()
                 fresh = sample['status'] == 'ok' and sample['age_ms'] is not None and sample['age_ms'] <= 500
@@ -198,6 +240,7 @@ class Gateway:
 
     def close(self):
         self.disarm('Server stopped')
+        self.sensor_modes.close()
         if self.vision.thread.is_alive():
             self.vision.close()
         self.camera.close()
@@ -293,7 +336,7 @@ class Gateway:
                 return {'online': detail == 'live' and now - updated < 1,
                         'reason': detail, 'age': round(now - updated, 2) if updated else None,
                         **camera.details()}
-            lidar = dict(self.lidar)
+            lidar = dict(self.lidar) if self.sensor_modes.mode == "lidar" else {"mode":"2d","online":False,"reason":"LiDAR off","points":[]}
             if lidar.get('received') and now - lidar['received'] > 2:
                 lidar = {'online': False, 'reason': 'LiDAR data stale'}
             from sensor_evidence import compose_evidence
@@ -303,6 +346,7 @@ class Gateway:
             # Keep telemetry bounded and never proxy upstream credentials.
             return {'mode': 'live', 'camera': state(self.camera), 'thermal': state(self.thermal),
                     'wifi': self.wifi, 'radar': self.radar, 'lidar': lidar, 'vision': vision, 'evidence': evidence,
+                    'sensors': self.sensor_modes.status(),
                     'control': {'armed': bool(self.owner), 'mine': self.owner == session,
                                 'enabled': self.args.enable_drive,
                                 'driver': self.motors.details(),
@@ -440,6 +484,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(413, {'error': 'Invalid body size'})
             data = json.loads(self.rfile.read(length))
             path = urlparse(self.path).path
+            if path == '/api/sensor-mode':
+                self.app.disarm('Sensor change')
+                try:
+                    self.app.sensor_modes.select(data.get('mode'))
+                    return self.send(200, {'ok':True,'sensors':self.app.sensor_modes.status()})
+                except (ValueError, RuntimeError, OSError) as e:
+                    return self.send(409, {'error':str(e)})
             if path == '/api/arm':
                 if data.get('protocol') != 3:
                     return self.send(426, {'error': 'Refresh the operator page', 'code': 'refresh_required'})

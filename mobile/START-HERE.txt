@@ -1,24 +1,17 @@
-WAVESENSE: CAMERA + RADAR EVIDENCE + 2D C1
+WAVESENSE PHONE CONTROLS
 
-Phone: http://100.99.36.78:8080/ (connect Tailscale, then refresh).
-Current deployment is VIEW ONLY. No motors are opened or commanded.
+Phone: http://100.99.36.78:8080/ (Tailscale connected, refresh after updates).
+Driving is enabled. Left stick moves; right stick turns. Release to stop.
 
-Camera is main. Boxes = analysed frames with visible-person corner brackets.
-Live = faster original video. Camera is never cropped in either orientation.
-Tap LiDAR for Map / Scan, pan, pinch zoom and target-button recenter.
-Tap Radar for range-only candidate cues; no direction or image location is measured.
+Tap ⏻ beside Radar or LiDAR to turn it on; tap again to turn it off.
+Turning on the other sensor stops the first. Both cannot capture together.
+White button = selected. Selection survives view changes and phone reconnects.
+Sensor changes stop any current drive command; use fresh stick input afterward.
+Camera keeps running. Tap a sensor label to change the main view.
 
-Pi: cd /srv/team28/wavesense-mobile && ./start-stationary.sh
-Do not use historical start.sh for stationary checks: it enables driving.
-Canonical radar service: Team-28-wifi-xray / wifi-sensing/radar.
-Contract: /srv/team28/runtime/radar/status.json (actual current timestamp required).
+Pi: cd /srv/team28/wavesense-mobile && ./start.sh
+This uses the existing robot-owner account for TinyRad access.
+For a stationary view-only check: ./start-stationary.sh
+Do not run separate sensor test programs while this server owns the devices.
 
-CAMERA + RADAR TEST PASSED WITH LIDAR STOPPED: 45 seconds, camera ~22.6 fps,
-radar ~250 frames/s, zero reconnects. Current phone process has C1 disabled.
-No automatic sensor-switching mechanism was added. Stop radar BEFORE restarting
-the normal console (it enables C1). All three together caused USB over-current.
-No external hub was visible. Thermal was absent.
-
-Read README.md for actual test results, limitations, source and recovery fixes.
-A radar candidate is not human confirmation; range alone cannot draw a person
-behind a wall at a camera pixel. No spatial association is claimed.
+See README.md for tests, hardware power results and range-only radar limits.

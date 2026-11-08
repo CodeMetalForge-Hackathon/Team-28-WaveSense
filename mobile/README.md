@@ -1,7 +1,7 @@
 # WaveSense phone sensor console
 
 Phone: **http://100.99.36.78:8080/** while connected to the robot's Tailscale network.
-Refresh after updates. The current deployment is **view only**: it never opens the motor UART.
+Refresh after updates. The current deployment enables driving through the sticks; wheels open only on fresh operator input. Release either stick to neutral; the control watchdog remains active.
 
 ## Current handoff: camera people + TinyRad evidence + 2D C1 mapping
 
@@ -78,7 +78,7 @@ resets backoff. The app does not launch or overwrite this separate service.
 
 ## Actual validation on 2026-11-08
 
-- 46 Python regression tests pass on the Pi, with mocked motors and USB in tests.
+- 51 Python regression tests pass on the Pi, with mocked motors and USB in tests.
   JS checks pass for control release, map projection, cloud decoding and evidence.
 - RGB measured ~12.5 fps; annotated output ~4.5 fps; inference ~90 ms on Pi 5.
   C1 measured ~10 sweeps/s. A 45 s stationary monitor had fresh camera, analysis
@@ -93,9 +93,10 @@ resets backoff. The app does not launch or overwrite this separate service.
   analysis samples fresh, camera ~22.6 fps, radar ~250 frames/s, zero radar
   reconnects. A startup USB command race was also removed before that comparison,
   so the test supports reduced concurrent load but does not isolate the sole cause.
-  Current phone server temporarily runs camera + radar, with C1 disabled in that
-  test process. **No automatic sensor-switching mechanism has been added.** Stop
-  radar before restarting the normal console, which will enable C1. All-three-
+  Current phone server has exclusive Radar / LiDAR power toggles. Both start off;
+  tap a power icon to start that sensor, tap again to stop it. Selecting the other
+  sensor fully stops the active source first. Selection stays active across view
+  changes and phone reconnects until turned off or the server shuts down. All-three-
   sensor stability and through-wall behaviour are **not passed**.
 - Thermal was absent. No thermal-live or Livox-live result is claimed.
 
@@ -126,3 +127,21 @@ as `models/person_nanodet.onnx`; Apache 2.0 licence in `vendor/nanodet/LICENSE`.
 SHA-256: `4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186`.
 All images and inference remain on the Pi. The generic person model is not face or
 identity recognition and is not trained or validated for this robot's environment.
+
+## Exclusive sensor controls and driving update
+
+Run `./start.sh` to enable operator driving. It runs under the existing adritforge
+account because that account owns TinyRadTool and its virtual environment. Use
+`./start-stationary.sh` for view-only checks. Both sensors initially start off.
+The 2D C1 is the LiDAR source for the exclusive switch.
+
+Tap the small ⏻ next to Radar or LiDAR. White means selected. Selecting one stops
+the other; selecting it again turns it off. Server serializes requests from all
+phones. Switching disarms active driving; use fresh stick input afterward. Failed
+or unconfirmed stop blocks starting the next sensor. Camera continues independently.
+Do not start a separate radar or LiDAR test program alongside this server.
+
+Live validation: LiDAR-only capture, LiDAR→Radar, Radar off and reverse switching
+checked without arming wheels. Driving enabled/motor access verified; no physical
+movement command sent. Main camera now uses the space formerly taken by the preview
+row, especially in landscape, while preserving the entire uncropped frame.

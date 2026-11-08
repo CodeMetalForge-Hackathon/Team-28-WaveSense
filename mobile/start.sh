@@ -1,5 +1,9 @@
 #!/bin/sh
 set -eu
+# TinyRad project and virtual environment belong to the robot owner.
+if [ "$(id -un)" != adritforge ]; then
+  exec sudo -u adritforge "$0" "$@"
+fi
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BIND_ADDRESS=${WAVESENSE_BIND:-$(tailscale ip -4 | head -n 1)}
 if [ -z "$BIND_ADDRESS" ]; then
