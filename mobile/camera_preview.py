@@ -5,6 +5,7 @@ Motor framing and wheel signs match Team-28 PR #1, commit 85f6b10.
 No hardware is opened on import or startup. Motors open only on explicit Arm.
 """
 import argparse
+from collections import deque
 import sys
 import atexit
 import fcntl
@@ -82,6 +83,8 @@ class Camera:
         self.sensor = None
         self.seq = 0
         self.source = {}
+        self.frame_times = deque(maxlen=60)
+        self.resolution = None
         self.condition = threading.Condition(self.lock)
 
     def snapshot(self):
@@ -90,7 +93,9 @@ class Camera:
 
     def details(self):
         with self.lock:
-            return dict(self.source, sequence=self.seq)
+            times = self.frame_times
+            fps = (len(times)-1)/(times[-1]-times[0]) if len(times)>1 and time.monotonic()-times[-1]<1 else 0
+            return dict(self.source, sequence=self.seq, resolution=self.resolution, stream_fps=round(fps,1))
 
     def close(self):
         if self.sensor:
@@ -117,6 +122,8 @@ class Camera:
                 if ok:
                     with self.condition:
                         self.frame = encoded.tobytes()
+                        self.resolution = [int(image.shape[1]),int(image.shape[0])]
+                        self.frame_times.append(time.monotonic())
                         # Preserve source age: an encoder must not make stale data fresh.
                         self.updated = time.monotonic() - max(0, sample['age_ms']) / 1000
                         self.state = 'live'
@@ -125,7 +132,7 @@ class Camera:
                             self.source['max_c_uncalibrated'] = float(data['temp']['max_c'])
                         self.condition.notify_all()
                     previous = sample['last_seen']
-            time.sleep(.08)  # 12.5 fps to phones; source keeps draining at full speed.
+            time.sleep(.005)  # Drain fresh frames promptly; no fixed 12.5 fps phone cap.
 
 
 class Gateway:
@@ -485,14 +492,7 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length))
             path = urlparse(self.path).path
             if path in ('/api/sensor-mode','/api/sensor'):
-                self.app.disarm('Sensor change')
-                try:
-                    if path == '/api/sensor':
-                        self.app.sensor_modes.set_enabled(data.get('sensor'),data.get('enabled'))
-                    else: self.app.sensor_modes.select(data.get('mode'))
-                    return self.send(200, {'ok':True,'sensors':self.app.sensor_modes.status()})
-                except (ValueError, RuntimeError, OSError) as e:
-                    return self.send(409, {'error':str(e)})
+                return self.send(409, {'error':'Sensors run automatically; refresh the page'})
             if path == '/api/arm':
                 if data.get('protocol') != 3:
                     return self.send(426, {'error': 'Refresh the operator page', 'code': 'refresh_required'})
@@ -550,6 +550,9 @@ def main():
     app.vision.start()
     for target in (app.camera.run, app.thermal.run, app.watchdog, app.wifi_poll, app.lidar_poll, app.radar_poll):
         threading.Thread(target=target, daemon=True).start()
+    for sensor in ('lidar','radar'):
+        try: app.sensor_modes.set_enabled(sensor, True)
+        except Exception as e: print(f'{sensor} startup: {type(e).__name__}', flush=True)
     print(f'WaveSense listening on http://{args.bind}:{args.port}; motors disarmed', flush=True)
     server.serve_forever()
 

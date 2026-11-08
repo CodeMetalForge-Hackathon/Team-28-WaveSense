@@ -127,23 +127,30 @@ SHA-256: `4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186`.
 All images and inference remain on the Pi. The generic person model is not face or
 identity recognition and is not trained or validated for this robot's environment.
 
-## Independent sensor controls and driving update
+## Automatic sensors and driving
 
-Run `./start.sh` to enable operator driving. It runs under the existing adritforge
-account because that account owns TinyRadTool and its virtual environment. Use
-`./start-stationary.sh` for view-only checks. Both sensors initially start off.
-The 2D C1 is the active LiDAR source.
+Run `./start.sh` to enable driving; it uses the existing adritforge account for
+TinyRad access. `./start-stationary.sh` keeps driving disabled. Both launchers start
+camera, radar and C1 automatically. Sensor previews select the main view; there are
+no power buttons. The sources keep capturing across view changes and phone reconnects.
+A failed startup of one source does not prevent the other from starting. Each live
+reader reconnects after unplug. Shutdown cleans up both sources even if a stop fails.
+Legacy toggle endpoints reject cached clients with a refresh message.
+Do not start a second reader for any device while this server owns them.
 
-Tap the small ⏻ next to Radar or LiDAR. White means selected. Each button only
-controls its own device; both can stay on. Switching either off leaves the other
-running. Per-sensor requests are serialized across phones, so simultaneous choices
-do not overwrite each other. Selection survives view changes and phone reconnects.
-Sensor changes disarm active driving; use fresh stick input afterward. Camera
-continues independently. Startup begins with both off; shutdown cleans up both,
-even if one fails to stop. The legacy mode endpoint also accepts `both`.
-Do not start a separate radar or LiDAR test program alongside this server.
+Live validation: simultaneous radar/C1/camera/SLAM passed 45/45 fresh samples with
+zero reconnects, driving enabled but no wheel command sent. Main camera uses the
+space formerly taken by the preview row, preserving the complete uncropped frame.
 
-Live validation: LiDAR-only capture, LiDAR→Radar, Radar off and reverse switching
-checked without arming wheels. Driving enabled/motor access verified; no physical
-movement command sent. Main camera now uses the space formerly taken by the preview
-row, especially in landscape, while preserving the entire uncropped frame.
+## Camera capability and Live cadence
+
+The connected icSpring camera enumerates only YUYV 640×480, nominal 30/25/20/15/10/5
+fps. Its active V4L2 interval is already 30 fps; it cannot capture 1920×1080.
+Live is now the default raw camera stream. The former fixed 80 ms encoding sleep
+has been removed; fresh frames are encoded as they arrive. Actual source and
+encoded-stream rates are reported separately as `camera.fps` and `camera.stream_fps`,
+with actual `camera.resolution`. Person Boxes remains an opt-in, slower exact-frame
+analysis view. A 1080p30-capable camera is required for real 1080p30 capture.
+
+The main camera label reports measured FPS for the selected Live or Boxes stream;
+LiDAR uses Hz for scan rate. FPS is not the nominal camera setting.

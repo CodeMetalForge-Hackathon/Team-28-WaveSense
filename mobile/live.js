@@ -2,15 +2,7 @@
 (()=>{
   const originalViews={...views},app=document.querySelector('.phone');
   const badge=document.querySelector('.badge'),fs=document.querySelector('.fullscreen');
-  let analysisEnabled=true, sensorPending=false;
-  function sensorButtons(){
-    for(const [key,mode] of [["lidar","lidar"],["wifi","radar"]]){
-      const card=app.querySelector(`.sensor-card[data-sensor="${key}"]`); if(!card)continue;
-      let b=card.querySelector(".sensor-power");
-      if(!b){b=document.createElement("button");b.className="sensor-power";b.setAttribute("aria-label",`Toggle ${mode}`);card.append(b);b.onclick=async e=>{e.stopPropagation();if(sensorPending)return;sensorPending=true;sensorButtons();try{const r=await request("/api/sensor",{data:{sensor:mode,enabled:!status?.sensors?.enabled?.[mode]},timeout:30000});const body=await r.json();if(!r.ok)throw new Error(body.error||"Sensor unavailable");await poll()}catch(err){command.textContent=err.message}finally{sensorPending=false;sensorButtons()}}}
-      const on=!!status?.sensors?.enabled?.[mode];b.textContent="⏻";b.setAttribute("aria-pressed",String(on));b.disabled=sensorPending||status?.sensors?.switching;card.classList.toggle("powered",on);
-    }
-  }
+  let analysisEnabled=false;
   let live=false,status=null,pollTimer=null,sessionPending=null;
   const control=new RobotControl({post,hasIntent:()=>activePointers.size>0||keys.size>0,onReset:()=>stopMotion(),onState:paintAvailability});
   const signatures={};
@@ -41,9 +33,8 @@
     const viewport=app.querySelector('.viewport');if(current==='rgb'&&!viewport.querySelector('.proximity-hud'))viewport.insertAdjacentHTML('beforeend','<div class="proximity-hud"><div class="lidar-readings"></div></div>');
     if(current==='rgb'&&!viewport.querySelector('.vision-toggle')){const b=document.createElement('button');b.className='vision-toggle';b.textContent=analysisEnabled?'Boxes':'Live';b.setAttribute('aria-label','Toggle visible-person analysis');b.onclick=()=>{analysisEnabled=!analysisEnabled;b.textContent=analysisEnabled?'Boxes':'Live';b.setAttribute('aria-pressed',String(analysisEnabled));bindMedia()};b.setAttribute('aria-pressed',String(analysisEnabled));viewport.append(b)}
     const hud=viewport.querySelector(".proximity-hud");if(hud)hud.hidden=!status?.lidar?.online;
-    sensorButtons();
     SensorEvidence.update(app,status);
-    if(status?.lidar?.mode!=='3d')LidarView.update(app,status?.lidar);else window.CloudView?.bind(app,status?.lidar);const sensor=current==='rgb'?'camera':current==='ir'?'thermal':current;const tag=app.querySelector('.viewport .demo-tag');if(tag)tag.textContent=(sensor==='wifi'?status?.radar:status?.[sensor])?.online?'LIVE':'RECONNECTING';
+    if(status?.lidar?.mode!=='3d')LidarView.update(app,status?.lidar);else window.CloudView?.bind(app,status?.lidar);const sensor=current==='rgb'?'camera':current==='ir'?'thermal':current;const tag=app.querySelector('.viewport .demo-tag');if(tag){const source=sensor==='wifi'?status?.radar:status?.[sensor];const rate=sensor==='camera'?(analysisEnabled&&status?.vision?.online?status.vision.fps:source?.stream_fps):sensor==='thermal'?source?.stream_fps:sensor==='lidar'?source?.fps:null;tag.textContent=source?.online?'LIVE'+(Number.isFinite(rate)?' · '+Math.round(rate)+(sensor==='lidar'?' Hz':' FPS'):''):'RECONNECTING'}
   }
   function paintAvailability(){if(!live)return;const state=control.state();command.textContent=state.error?'Connection lost':status?.control?.enabled===false?'View only':state.armed?'Driving':state.available?'Ready':'Connecting';}
   async function request(path,{data,timeout=2500}={}){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);try{return await fetch(path,{method:data?'POST':'GET',headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined,signal:controller.signal,cache:'no-store',credentials:'same-origin',keepalive:!!data})}finally{clearTimeout(timer)}}

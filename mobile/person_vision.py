@@ -2,6 +2,7 @@
 Radar evidence is never used to invent an image location or human silhouette.
 """
 import importlib.util
+from collections import deque
 import math
 from pathlib import Path
 import threading
@@ -21,6 +22,7 @@ class PersonVision:
     def __init__(self, camera, root):
         self.camera,self.root=camera,Path(root)
         self.lock=threading.Lock();self.condition=threading.Condition(self.lock)
+        self.frame_times=deque(maxlen=30)
         self.frame=None;self.updated=0;self.seq=0;self.meta={'reason':'Starting local person detector','boxes':[]}
         self.done=threading.Event()
         self.thread=threading.Thread(target=self.run,name='camera-person-detection',daemon=True)
@@ -31,7 +33,9 @@ class PersonVision:
         with self.lock:
             age=(time.monotonic()-self.updated)*1000 if self.updated else None
             fresh=bool(age is not None and age<1000)
-            return dict(self.meta,online=fresh,age_ms=round(age) if age is not None else None,sequence=self.seq,
+            times=self.frame_times
+            fps=(len(times)-1)/(times[-1]-times[0]) if fresh and len(times)>1 else 0
+            return dict(self.meta,fps=round(fps,1),online=fresh,age_ms=round(age) if age is not None else None,sequence=self.seq,
                         source='camera',boxes=self.meta.get('boxes',[]) if fresh else [])
 
     def run(self):
@@ -73,6 +77,7 @@ class PersonVision:
                     # Capture age includes inference time; slow processing cannot refresh old frames.
                     capture_age=max(0,(time.time()*1000-s['last_seen'])/1000)
                     with self.condition:
+                        self.frame_times.append(time.monotonic())
                         self.frame=jpg.tobytes();self.updated=time.monotonic()-capture_age;self.seq+=1
                         self.meta={'reason':'Visible-person analysis','boxes':boxes,'width':w,'height':h,
                                    'capture_ms':s['last_seen'],'inference_ms':round(elapsed,1),'model':'OpenCV NanoDet','frame_matched':True}

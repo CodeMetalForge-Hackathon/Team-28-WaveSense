@@ -40,3 +40,8 @@
 @media(orientation:landscape) and (min-width:600px){.sensor-tray{top:8px;right:105px;width:220px;height:30px;max-width:40%;align-self:auto}.sensor-card{height:30px}.sensor-power{height:26px;width:26px;font-size:18px;bottom:2px;right:2px}.sensor-preview .radar-scope b,.sensor-preview canvas{display:none}.sensor-name{bottom:6px;font-size:9px}.drive{height:125px;bottom:16px}.joystick{width:122px;height:122px}.vision-toggle{top:8px;left:88px}.evidence-cue{bottom:42px}}
 .sensor-power{width:40px;height:40px;bottom:3px}.sensor-name{bottom:8px}
 @media(orientation:landscape) and (min-width:600px){.status{font-size:0;gap:0}.status .badge,.status .dot{display:none}.sensor-tray{top:2px;right:60px;width:250px;height:38px}.sensor-card{height:38px}.sensor-power{width:34px;height:34px;bottom:2px}.sensor-name{bottom:11px}}
+
+.viewport .back-camera{z-index:6}
+
+.sensor-preview{opacity:1}.sensor-name{bottom:6px}.sensor-tray{width:180px}.sensor-power{display:none!important}
+@media(orientation:landscape) and (min-width:600px){.sensor-tray{width:180px}.sensor-name{bottom:10px}}
