@@ -180,6 +180,31 @@ expect_rc 0 && expect_out "Plan only" &&
   expect_no_out "0.0.0.0:" && expect_no_call "docker run" && expect_no_call "MUTATION" &&
   expect_safe && pass
 
+it "start: --udp-loopback publishes UDP only on loopback (wifi-xray front door) and starts nothing"
+scenario_fresh
+token_file 600
+run start_ruview.sh --udp-loopback 5006
+expect_rc 0 && expect_out "Plan only" && expect_out "127.0.0.1:5006:5005/udp" &&
+  expect_no_out "10.42.0.1:5005:5005/udp" && expect_out "front door must listen on wlan1 (10.42.0.1:5005)" &&
+  expect_out "RUVIEW_UDP_ALLOW=172.17.0.1/32" && expect_no_out "0.0.0.0:" && expect_no_call "docker run" &&
+  expect_safe && pass
+
+it "start: --udp-loopback rejects bad ports"
+scenario_fresh
+token_file 600
+run start_ruview.sh --udp-loopback 80
+expect_rc 2 && expect_out "1024 to 65535" && expect_no_call "docker run" &&
+  { run start_ruview.sh --udp-loopback abc; expect_rc 2; } &&
+  { run start_ruview.sh --udp-loopback 70000; expect_rc 2; } && pass
+
+it "start: --udp-loopback is not blocked by the front door already holding the hotspot port"
+scenario_fresh
+token_file 600
+printf 'UNCONN 0      0           10.42.0.1:5005      0.0.0.0:*\n' >"$S/ss_udp"
+run start_ruview.sh --udp-loopback 5006
+expect_rc 0 && expect_out "no port or name conflicts" &&
+  { run start_ruview.sh; expect_rc 1; expect_out "UDP 5005 is already in use"; } && pass
+
 it "start: allowlist follows the detected gateway (not hard-coded)"
 scenario_fresh
 token_file 600
