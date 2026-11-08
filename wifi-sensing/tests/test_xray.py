@@ -30,6 +30,21 @@ class Packets(unittest.TestCase):
     def test_positive_rssi_is_negated_like_the_server(self):
         self.assertEqual(parse_frame(build_frame(np.ones((1, 4)), rssi=45)).rssi, -45)
 
+    def test_esp32c5_12bit_payload_round_trip_and_detection(self):
+        rng = np.random.default_rng(1)
+        csi = (rng.normal(0, 300, (1, 26)) + 1j * rng.normal(0, 300, (1, 26))).round()
+        d = build_frame(csi, fmt="s12", rssi=-40)
+        self.assertEqual(len(d), 20 + 104)
+        f = parse_frame(d)
+        self.assertEqual((f.fmt, f.n_subcarriers), ("s12", 26))
+        np.testing.assert_allclose(f.csi, np.clip(csi.real, -2048, 2047) + 1j * np.clip(csi.imag, -2048, 2047))
+        # the real C5 payload has an odd word count (53 words for 26 subcarriers + 1 spare)
+        odd = d[:6] + (53).to_bytes(2, "little") + d[8:] + b"\x00\x00"
+        self.assertEqual(parse_frame(odd).n_subcarriers, 26)
+        # int8 data with signal has negative Q bytes, so it is never mistaken for s12
+        g = parse_frame(build_frame(np.array([[10 - 3j, -20 + 7j, 5 - 1j, 1 + 1j]])))
+        self.assertEqual((g.fmt, g.n_subcarriers), ("int8", 4))
+
     def test_rejects_garbage(self):
         good = build_frame(np.ones((1, 8)))
         self.assertIsNone(parse_frame(b""))
@@ -141,21 +156,21 @@ class EngineEdges(unittest.TestCase):
 
     def test_rssi_gate_drops_a_distant_transmitter_but_follows_a_real_drop(self):
         e = NearZoneEngine()
-        strong = build_frame(np.full((1, 16), 30 + 0j), rssi=-68)
-        weak = build_frame(np.full((1, 16), 5 + 0j), rssi=-92)             # another AP far away
+        strong = build_frame(np.full((1, 16), 30 - 5j), rssi=-68)
+        weak = build_frame(np.full((1, 16), 5 - 1j), rssi=-92)             # another AP far away
         t = 0.0
         for i in range(300):
             t += 0.03
             e.feed(parse_frame(weak if i % 50 == 49 else strong), t)
         self.assertEqual(e.gated, 6)                                         # every weak frame, no strong one
         self.assertEqual(len(e.buf), 294)
-        dropped = build_frame(np.full((1, 16), 12 + 0j), rssi=-86)         # body blocking the link: 18 dB lasting drop
+        dropped = build_frame(np.full((1, 16), 12 - 3j), rssi=-86)         # body blocking the link: 18 dB lasting drop
         before = e.gated
         for _ in range(300):
             t += 0.03
             e.feed(parse_frame(dropped), t)
         self.assertLess(e.gated - before, 120)                               # the median follows; frames flow again
-        self.assertEqual(e.buf[-1][1][0], 12.0)
+        self.assertAlmostEqual(float(e.buf[-1][1][0]), abs(12 - 3j), places=4)
 
     def test_too_short_calibration_is_refused(self):
         s = Scene(seed=4)
