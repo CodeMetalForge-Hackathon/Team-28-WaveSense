@@ -22,7 +22,8 @@
   "chassis": {
     "min_duty": 35,
     "min_duty_note": "Front-left (M1) alone: hummed at duty 30, turned at 35 (battery 6.4-7.2 V, wheels up, 2026-11-07). Non-zero wheel commands map into min_duty..duty_cap.",
-    "duty_cap_max": 50
+    "duty_cap_max": 100,
+    "duty_cap_note": "UART protocol ceiling 100, enabled at operator request 2026-11-08; not a calibrated ground speed. App defaults to full command, tests remain mocked."
   },
   "proximity": {
     "mode": "advisory",

@@ -93,3 +93,12 @@ class WarmMotorSafety(unittest.TestCase):
    with self.assertRaises(ValueError):self.app.drive('a',1,.1,0,lease=lease,max_speed=speed)
   with self.assertRaises(ValueError):self.app.drive('a',1,.35,0,lease=lease,max_speed=50)
   self.app.drive('a',1,.175,0,lease=lease,max_speed=50)
+
+ def test_stopped_connection_remains_ready_for_thirty_seconds(self):
+  with patch.object(gateway.time,'monotonic',return_value=100):
+   lease=self.app.arm('a');self.app.release('a',lease)
+  self.assertEqual(self.app.motor_idle_until,130)
+  with patch.object(gateway.time,'monotonic',return_value=125):self.watchdog_once()
+  self.assertFalse(self.app.motors.closed)
+  with patch.object(gateway.time,'monotonic',return_value=131):self.watchdog_once()
+  self.assertTrue(self.app.motors.closed)

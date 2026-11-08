@@ -93,3 +93,15 @@ Strafing was only checked wheels-up, by each wheel's direction. Whether the robo
 **Battery:** the board reports voltage about 9 times a second (`status()["battery_v"]`). On battery it read 7.17 V idle and sagged to 6.26 V at duty 40.
 
 **Limit:** if the Pi loses power or hard-crashes, the board keeps its last duty. Keep the board switch reachable.
+
+
+## Operator full-speed update — 2026-11-08
+
+The phone operator requested the maximum supported duty. The shared UART frame
+builder and chassis now allow 100 duty; 50 was an inherited bring-up software
+restriction, not the protocol ceiling. The nudge script keeps its 50-duty cap.
+The mobile app requests 100 duty and a 1000-duty/s ramp. Stop, watchdog, deadman
+and reversal braking are retained. Mocked full-speed/stop/limit tests cover the
+change; no physical full-speed trial was performed by the agent. Previous
+wheels-up direction results and battery sag readings above remain historical
+measurements, not validation at 100 duty.

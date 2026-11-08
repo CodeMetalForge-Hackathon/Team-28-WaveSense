@@ -83,3 +83,43 @@ and 300 ms control watchdog remain. Old protocol-3 pages must refresh.
 Checked with fake motors/serial only: real PWM-cap mapping, healthy connection
 reuse, lease invalidation, zero stop, idle expiry, camera-loss close and rejection
 of commands exceeding the selected limit. No physical drive test was performed.
+
+
+## Full protocol duty and transport response — 2026-11-08
+
+Supersedes the previous 50-duty maximum and five-second readiness window.
+Operator requested maximum speed and faster stick response. The old 50 ceiling
+was a software bring-up restriction imported from `robot/nudge.py`, not the UART
+protocol maximum. `robot/board.py` now clamps at +/-100 and the app requests a
+100-duty ceiling. The separate nudge tool retains its conservative 50-duty cap.
+`config/robot.json` records the new ceiling. At full stick, slider values
+25/50/100 map to duties 51.25/67.5/100 with min_duty=35. Zero still stops;
+combined translation/rotation is normalized. Speed is not measured ground speed.
+The new phone preference key starts the slider at 100% after refresh.
+
+The app requests slew=1000 duty/s (previously 250): nominal full-duty ramp is
+100 ms rather than 400 ms, excluding transport, board readiness and the 50 Hz
+tick. Immediate STOP, lease invalidation, 300 ms watchdog, independent deadman,
+120 ms reversal brake and camera interlock are retained. A normal release keeps
+the stopped connection ready for 30 seconds; no lease survives release and no
+movement resumes without fresh input. Idle expiry, camera loss and faults still
+close the connection. First touch after cold/expired readiness must still wait
+for healthy deadman and fresh battery telemetry. No automatic motor opening.
+
+HTTP/1.1 reuses control connections, disables Nagle buffering and expands the
+accept backlog to 64. Rejected unread POSTs close their connection, preventing
+leftover bodies from becoming requests; indefinite video streams close too.
+These changes remove avoidable transport overhead, not all network latency.
+
+Validation uses fake motors, fake serial and a pseudo-terminal for the deadman.
+No nonzero commands or physical wheel tests by the agent. Confirm floor speed
+and reaction as the operator. Before deployment the live radar status was fresh
+with range/angle telemetry, unlike the previous BrdRst-timeout handoff; mounting
+remains unverified and the radar is not a confirmed-human classifier. No radar
+reader, Wi-Fi, Tailscale, Docker or firmware changes are included.
+
+Deployment verification: camera, 2D LiDAR and radar were online after restarting
+the canonical app. Live status reports max_duty=100 and motors disarmed. Twelve
+read-only status requests reused one HTTP/1.1 socket (36 ms median, 120 ms max
+round trip from the development computer); this is not a measured drive response.
+Rollback files: `/srv/team28/wavesense-mobile/before-full-speed-20261108-105908`.

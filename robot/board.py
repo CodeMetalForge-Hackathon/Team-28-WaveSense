@@ -4,11 +4,14 @@ Frames: AA 55 | func | len | data... | crc8(func, len, data)   (see robot/nudge.
   func 3, data 05 n {idx-1 (u8), duty (f32 LE)}*n   motor duty, -100..100
   func 0, data 04 <u16 mV>                          battery report, sent by the
                                                     board unprompted (~9 Hz)
-Signs and the duty cap come from robot/nudge.py (verified in robot/MOTORS.md).
+Signs and CRC come from robot/nudge.py (verified in robot/MOTORS.md).
+The UART protocol supports +/-100 duty; nudge keeps its own 50-duty test cap.
 """
 import struct
 
-from robot.nudge import FORWARD_SIGN, MAX_DUTY, crc8
+from robot.nudge import FORWARD_SIGN, crc8
+
+MAX_DUTY = 100.0  # Protocol ceiling, separate from conservative nudge tests.
 
 PORT = "/dev/ttyAMA0"
 BAUD = 1_000_000

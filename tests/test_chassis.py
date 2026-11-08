@@ -59,14 +59,35 @@ class Mixing(unittest.TestCase):
         self.assertAlmostEqual(max(abs(v) for v in w.values()), 1.0)  # normalised
 
     def test_duty_cap_hard_limit(self):
-        ch, _ = make(duty_cap=80)
-        self.assertEqual(ch.duty_cap, 50.0)
+        ch, _ = make(duty_cap=150)
+        self.assertEqual(ch.duty_cap, 100.0)
         d = ch.set_velocity(5, 0, 0)                  # input clipped to 1
-        self.assertEqual({m: abs(v) for m, v in d.items()}, {1: 50, 2: 50, 3: 50, 4: 50})
+        self.assertEqual({m: abs(v) for m, v in d.items()}, {1: 100, 2: 100, 3: 100, 4: 100})
         self.assertEqual({m: (v > 0) - (v < 0) for m, v in d.items()}, FORWARD_SIGN)
         ch.close()
         f = motor_frame({1: 999.0})                   # last-line clamp in the frame builder
-        self.assertEqual(struct.unpack_from("<f", f, 7)[0], 50.0)
+        self.assertEqual(struct.unpack_from("<f", f, 7)[0], 100.0)
+
+    def test_nudge_retains_its_conservative_test_limit(self):
+        from robot.nudge import MAX_DUTY
+        self.assertEqual(MAX_DUTY, 50)
+
+    def test_full_speed_stays_bounded_and_stop_is_immediate(self):
+        ch, ser = make(duty_cap=100, min_duty=35, slew=1000)
+        try:
+            started = time.monotonic()
+            for _ in range(8):
+                ch.set_velocity(1, 0, 0)
+                time.sleep(.02)
+            duties = [(t,d) for t,d in ser.duties() if t >= started]
+            self.assertTrue(any(max(map(abs,d.values())) >= 99 for _,d in duties))
+            full = min(t for t,d in duties if max(map(abs,d.values())) >= 99)
+            self.assertLess(full-started,.18)
+            self.assertTrue(all(max(map(abs,d.values())) <= 100 for _,d in duties))
+            ch.stop('full speed stop regression')
+            self.assertFalse(any(ser.duties()[-1][1].values()))
+        finally:
+            ch.close()
 
     def test_min_duty_mapping(self):
         self.assertEqual(wheel_duty(0.005, 35, 40), 0.0)        # tiny command -> stop

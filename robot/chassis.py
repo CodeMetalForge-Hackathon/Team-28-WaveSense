@@ -8,7 +8,7 @@
 Inputs are normalised -1..1:  vx forward+, vy left+, wz counter-clockwise+.
 Wheel duty: mix(vx, vy, wz) gives -1..1 per wheel; a non-zero command maps into
 min_duty..duty_cap (min_duty = motor start threshold from config/robot.json,
-duty_cap <= MAX_DUTY = 50), then the per-motor FORWARD_SIGN from robot/MOTORS.md. A 50 Hz control thread applies
+duty_cap <= MAX_DUTY = 100), then the per-motor FORWARD_SIGN from robot/MOTORS.md. A 50 Hz control thread applies
 slew-rate limiting and the watchdog; stop() and watchdog stops bypass the slew
 and write STOP immediately. A separate deadman process (robot/deadman.py)
 stops the wheels if this process dies or the control thread stalls.

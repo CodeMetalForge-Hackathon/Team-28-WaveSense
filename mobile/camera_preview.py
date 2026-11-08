@@ -27,7 +27,9 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 WATCHDOG = 0.30
-APP_MAX_DUTY = 50.0
+APP_MAX_DUTY = 100.0
+MOTOR_READY_S = 30.0
+APP_SLEW = 1000.0
 SIGNS = {1: -1, 2: 1, 3: -1, 4: 1}
 
 
@@ -49,7 +51,7 @@ class Motors:
                 return
             self.close()
         from robot.chassis import Chassis
-        self.chassis = Chassis(port=self.port, duty_cap=APP_MAX_DUTY, watchdog_s=.3,
+        self.chassis = Chassis(port=self.port, duty_cap=APP_MAX_DUTY, slew=APP_SLEW, watchdog_s=.3,
                                deadman=True, handle_signals=False)
         self.max_duty = min(APP_MAX_DUTY,self.chassis.duty_cap)
         deadline = time.monotonic() + 1.2
@@ -293,7 +295,7 @@ class Gateway:
             if keep_ready:
                 try:
                     self.motors.idle()
-                    self.motor_idle_until = time.monotonic()+5
+                    self.motor_idle_until = time.monotonic()+MOTOR_READY_S
                 except Exception:self.motors.close()
             else:self.motors.close()
 
@@ -396,7 +398,16 @@ class Gateway:
                                 'watchdog_ms': int(WATCHDOG * 1000), 'max_duty': getattr(self.motors,'max_duty',APP_MAX_DUTY)}}
 
 
+class ControlHTTPServer(ThreadingHTTPServer):
+    # Touch changes, heartbeats, telemetry and video may connect at once.
+    request_queue_size = 64
+    daemon_threads = True
+
+
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    disable_nagle_algorithm = True
+    timeout = 5
     server_version = 'WaveSense'
 
     def log_message(self, *_args):
@@ -411,7 +422,13 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(body, allow_nan=False).encode()
         elif isinstance(body, str):
             body = body.encode()
+        # Reject unread POST bodies by closing: they must never be parsed as
+        # another request when the browser reuses an HTTP/1.1 connection.
+        if self.command == 'POST' and not getattr(self, '_body_consumed', False):
+            self.close_connection = True
         self.send_response(code)
+        if self.close_connection:
+            self.send_header('Connection', 'close')
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
@@ -476,7 +493,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, self.app.status(session))
         if path in ('/api/camera.mjpg', '/api/thermal.mjpg', '/api/camera-analysis.mjpg'):
             camera = self.app.vision if path == '/api/camera-analysis.mjpg' else self.app.camera if path == '/api/camera.mjpg' else self.app.thermal
+            self.close_connection = True
             self.send_response(200)
+            self.send_header('Connection', 'close')
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
             self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
             self.send_header('X-Accel-Buffering', 'no')
@@ -512,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, (ROOT / filename).read_bytes(), mime)
 
     def do_POST(self):
+        self._body_consumed = False
         if not self.host_allowed():
             return self.send(421, {'error': 'Use the robot address'})
         if not self.same_origin():
@@ -523,7 +543,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             if not 0 < length <= 100_000:
                 return self.send(413, {'error': 'Invalid body size'})
-            data = json.loads(self.rfile.read(length))
+            body = self.rfile.read(length)
+            self._body_consumed = True
+            data = json.loads(body)
             path = urlparse(self.path).path
             if path in ('/api/sensor-mode','/api/sensor'):
                 return self.send(409, {'error':'Sensors run automatically; refresh the page'})
@@ -572,7 +594,7 @@ def main():
     except BlockingIOError:
         raise SystemExit('WaveSense is already running from this folder')
     app = Gateway(args)
-    server = ThreadingHTTPServer((args.bind, args.port), Handler)
+    server = ControlHTTPServer((args.bind, args.port), Handler)
     server.daemon_threads = True
     server.app = app
     atexit.register(app.close)
