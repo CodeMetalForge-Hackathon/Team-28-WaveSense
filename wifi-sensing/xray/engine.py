@@ -71,11 +71,18 @@ class NearZoneEngine:
     BREATH_K, BREATH_FLOOR, BREATH_CONSISTENCY = 1.5, 30.0, 0.5
     MOTION_HIGH = 4.0             # motion / calibration median above which breathing is not judged
     ON_COUNT, OFF_COUNT = 3, 10   # hysteresis, in assess() calls (~seconds)
+    # Frames this far below the node's median RSSI come from another, distant transmitter on the
+    # channel (measured 2026-11-07: ~2% of frames at -90..-94 dBm vs the hotspot at -67..-69). Their
+    # channel is unrelated, so they are dropped. 15 dB leaves room for a body blocking the link; the
+    # median includes dropped frames, so a lasting drop of the real link is followed within ~200 frames.
+    RSSI_GATE_DB, RSSI_GATE_MIN = 15.0, 50
 
     def __init__(self, calibration: Calibration | None = None, max_rate_hz: float = 100.0):
         self.cal = calibration
         self.buf = collections.deque(maxlen=int(BREATH_WIN * max_rate_hz * 1.5))
         self.rssi = collections.deque(maxlen=200)
+        self._rssi_all = collections.deque(maxlen=200)
+        self.gated = 0
         self._calib: list | None = None
         self._calib_mask: np.ndarray | None = None
         self._on = self._off = 0
@@ -83,6 +90,11 @@ class NearZoneEngine:
 
     # ---- input ---------------------------------------------------------------
     def feed(self, frame, t: float) -> None:
+        self._rssi_all.append(frame.rssi)
+        if (self.RSSI_GATE_DB is not None and len(self._rssi_all) >= self.RSSI_GATE_MIN
+                and frame.rssi < float(np.median(self._rssi_all)) - self.RSSI_GATE_DB):
+            self.gated += 1
+            return
         amp = frame.amplitude
         if self.buf and len(self.buf[-1][1]) != len(amp):
             self.buf.clear()                       # subcarrier layout changed (e.g. HT -> HE)
@@ -157,7 +169,8 @@ class NearZoneEngine:
         out = dict(t=now, valid=f["valid"], rate_hz=round(f["rate_hz"], 1), coverage=round(f["coverage"], 2),
                    rssi_dbm=f["rssi_dbm"], n_subcarriers=f["n_subcarriers"],
                    breathing_bpm=f["breath_bpm"], breathing_snr=round(f["breath_snr"], 2),
-                   breathing_consistency=round(f["breath_consistency"], 2), calibrated=self.cal is not None)
+                   breathing_consistency=round(f["breath_consistency"], 2), calibrated=self.cal is not None,
+                   gated_frames=self.gated)
         if not f["valid"]:
             out.update(state="poor_link", detail="too few CSI frames to judge")
             return out

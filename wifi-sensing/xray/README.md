@@ -36,7 +36,7 @@ ESP32-C5 node ──Wi-Fi CSI UDP──▶ wifi-xray front door ──same datag
 |---|---|
 | `csi_packet.py` | parse RuView ESP32 CSI datagrams (magic `0xC5110001`; layout from the server's `parse_esp32_frame`) |
 | `dsp.py` | resampling, per-frame normalisation (cancels automatic gain steps), Hampel filter, motion energy, breathing-like periodicity, profile distance |
-| `engine.py` | calibration, thresholds (multiples of the calibration's own 95th percentiles, with floors), hysteresis, the CANDIDATE report |
+| `engine.py` | calibration, thresholds (multiples of the calibration's own 95th percentiles, with floors), hysteresis, RSSI gate for frames from distant transmitters (no measurable effect on the 2026-11-07 recordings), the CANDIDATE report |
 | `receiver.py` | UDP front door: hotspot-subnet allowlist, unchanged forwarding to RuView, engine, recorder, loopback HTTP |
 | `fusion.py` | zone summary across nodes: CANDIDATE only when two judging links agree; one link of several gives a WEAK candidate |
 | `evaluate.py` | replay labelled recordings and **measure** false-candidate and detection rates |
@@ -63,6 +63,10 @@ curl -s 127.0.0.1:3100/status.json
 1. `curl -s 127.0.0.1:3100/status.json` and read `link.hint`.
 2. `python3 scripts/esp32_log.py` reads the node's console for 40 s **without resetting it**, and translates the Wi-Fi disconnect reason. It accepts only `/dev/ttyACM*` by default (`/dev/ttyUSB0` on this Pi is the robot lidar).
 3. `reason=201` (NO_AP_FOUND) means the node hears no AP with its SSID on any channel. Check in this order: the SSID shows up on a phone next to the Pi (the hotspot really beacons); the node's antenna is fitted; the node is close to the Panda adapter; the provisioned SSID matches.
+
+### Placement: the link must cross the zone you want to watch
+
+One link senses mostly what is **on or near the line between its two antennas** (the ESP32's and the Panda adapter's). With both devices plugged in side by side, that line is a few centimetres long: a person seated 60 cm away was not detected (measured 2026-11-07, 0% of 164 windows). Put the ESP32 on its own USB power 1.5–3 m from the Pi, so the line runs through the seats you want to watch, at about table height and clear of large metal. Keep the node's RSSI above about -85 dBm (`status.json` `nodes.<n>.rssi_dbm`). Recalibrate after every move.
 
 ### Calibrate on site, with the crowd present
 
@@ -93,7 +97,8 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 |---|---|---|---|---|
 | 2026-11-07 | synthetic model (`tests/synth_csi.py`) | 0% | >80% (first within 20 s) | **unit test only, not evidence** |
 | 2026-11-07 21:21 | venue, node 1. Live calibration 21:17:54–21:19:34 (99 windows), scored on a **separate** empty recording `empty-crowd-A` 21:21:25–21:24:41 (196 s, 7,406 datagrams) | **0.0%** of 164 judged windows (median profile 0.93 vs threshold 4.0; breathing SNR 13.2 vs 35.9) | not measured yet | **measured, one recording only.** Crowd level and node placement not recorded (unverified). Says nothing yet about detection |
-| (pending) | `one-seated-A`, `two-seated-A`, `two-seated-crowd-B`, `empty-crowd-B` | n/a | n/a | need the two consenting teammates |
+| 2026-11-07 21:27 | `one-seated-A` 21:27:14–21:30:31 (196 s): one consenting person seated **about 60 cm beside** the devices, with the ESP32 and the Panda adapter **side by side** on the Pi | n/a | **0.0%** of 164 judged windows (median profile 1.0 vs threshold 4.0) | **measured: not detected.** Inferred cause: the link is a few cm long, so the person was never in its path (see Placement). Offline, 10 s profiles were shifted (median 1.77 vs empty 1.01), but drift over the 6 min between recordings was not ruled out |
+| (pending) | after moving the ESP32 so the link crosses the seats: recalibrate, then `empty`, `one-seated`, `two-seated` | n/a | n/a | needs the move |
 
 ## Link facts (2026-11-07 21:14, node 1, measured)
 

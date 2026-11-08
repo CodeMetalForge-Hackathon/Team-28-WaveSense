@@ -139,6 +139,24 @@ class EngineEdges(unittest.TestCase):
         sparse.append(e2.assess(40.0))
         self.assertIn(sparse[-1]["state"], ("poor_link", "no_data"))
 
+    def test_rssi_gate_drops_a_distant_transmitter_but_follows_a_real_drop(self):
+        e = NearZoneEngine()
+        strong = build_frame(np.full((1, 16), 30 + 0j), rssi=-68)
+        weak = build_frame(np.full((1, 16), 5 + 0j), rssi=-92)             # another AP far away
+        t = 0.0
+        for i in range(300):
+            t += 0.03
+            e.feed(parse_frame(weak if i % 50 == 49 else strong), t)
+        self.assertEqual(e.gated, 6)                                         # every weak frame, no strong one
+        self.assertEqual(len(e.buf), 294)
+        dropped = build_frame(np.full((1, 16), 12 + 0j), rssi=-86)         # body blocking the link: 18 dB lasting drop
+        before = e.gated
+        for _ in range(300):
+            t += 0.03
+            e.feed(parse_frame(dropped), t)
+        self.assertLess(e.gated - before, 120)                               # the median follows; frames flow again
+        self.assertEqual(e.buf[-1][1][0], 12.0)
+
     def test_too_short_calibration_is_refused(self):
         s = Scene(seed=4)
         e = NearZoneEngine()
