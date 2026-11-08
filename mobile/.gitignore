@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.deps/
+bin/
+.gateway.lock
+.livox-config.json
+*.log
+*.pid
+.drive-key
+*.tgz
+release-*/
+stop-fix-stage/
+map-before-*/

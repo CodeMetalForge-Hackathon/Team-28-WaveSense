@@ -1,0 +1,3 @@
+import assert from 'node:assert/strict';import {decodePreview} from '../cloud_codec.mjs';
+const b=new ArrayBuffer(40),d=new DataView(b);d.setUint32(0,0x57533344);d.setUint8(4,1);d.setUint8(5,8);d.setUint16(6,32,true);d.setUint32(8,17,true);d.setUint32(12,1,true);d.setFloat32(28,.3,true);d.setInt16(32,123,true);d.setInt16(34,-234,true);d.setInt16(36,56,true);d.setUint8(38,88);
+const f=decodePreview(b);assert.equal(f.sequence,17);assert.equal(f.count,1);assert(Math.abs(f.positions[1]+2.34)<1e-6);assert.equal(f.intensity[0],88);assert.throws(()=>decodePreview(b.slice(0,39)));d.setUint32(12,999999,true);assert.throws(()=>decodePreview(b));console.log('PASS: binary point-cloud units, bounds and truncation');

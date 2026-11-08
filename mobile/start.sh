@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+# TinyRad project and virtual environment belong to the robot owner.
+if [ "$(id -un)" != adritforge ]; then
+  exec sudo -u adritforge "$0" "$@"
+fi
+APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+BIND_ADDRESS=${WAVESENSE_BIND:-$(tailscale ip -4 | head -n 1)}
+if [ -z "$BIND_ADDRESS" ]; then
+  echo 'Tailscale is not connected.' >&2
+  exit 1
+fi
+exec /srv/team28/Team-28/.venv/bin/python "$APP_DIR/camera_preview.py" --bind "$BIND_ADDRESS" --port 8080 --enable-drive "$@"
