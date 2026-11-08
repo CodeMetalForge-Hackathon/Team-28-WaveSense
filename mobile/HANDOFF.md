@@ -12,6 +12,7 @@ A **Bio Radar** button on the right of the camera view shows or hides radar cand
 - **Direction needed the factory RX correction, which never loaded under NumPy 2.** ADI's `BrdGetCalDat` computes `uint8 << 24` and loses the upper bytes, so `tinyrad_dev.py` now reads the EEPROM bytes itself. Measured on this board 2026-11-08: loaded, `[0.956+0.196j, 1.296-0.054j, 0.964+0.007j, 1+0j]`.
 - **Unverified:** left/right sign, zero offset against the camera, camera field of view (70 deg placeholder). Set `CALIBRATION` at the top of `bio_radar.js` from a person standing at known positions, and set `verified` once done so the bearing decides which camera box a return belongs to; no restart is needed for that file.
 - **Measured on recordings only:** seated person in the open, bearing p10..p90 of 4..9 deg over 57/57 candidate seconds, 0/59 candidate seconds in the empty minute. Through a wooden door it is withheld more often and far less steady (up to -23..20 deg within a minute); the person's true position was not logged.
+- **Watch range is 3 m, by team decision on 2026-11-08.** Pointed at a concrete outside wall with the room empty, the 5 m setting flagged a person 80/80 s, all from bins at 3.9-4.8 m. Replay at 3 m, measured: that run 0/51 s, quiet empty room 0/41 s, seated person in the open 41/41 s, seated behind a wooden door 86/86 s. People beyond 3 m are not reported.
 - A box is a place to check, not a confirmed person. No box is not an all-clear. 24 GHz passes wood and drywall but not concrete or rubble.
 
 ## Current app
@@ -36,7 +37,7 @@ Canonical radar code: `/home/adritforge/Team-28-wifi-xray/wifi-sensing/radar`, b
 
 ## Radar software changes
 
-- The existing engine analyses 0.3–5 m but the phone previously watched only 2 m. The app now launches `--near-range-m 5.0`, retaining existing thresholds and adaptive background logic.
+- The existing engine analyses 0.3–5 m but the phone previously watched only 2 m. The app later launched `--near-range-m 5.0`; it is now 3.0 (see Bio Radar above), with the same thresholds and adaptive background logic.
 - Replay of the team's documented empty/person recording gave identical 2 m and 5 m results: empty-before 0/31 candidate seconds; seated person 57/60; empty-after-first-10-seconds 10/50 (window/hysteresis carryover). These are in-sample results, not general accuracy or a fresh human test.
 - New `radar_scene.py` publishes bounded measured range profiles and experimental four-RX angle-return data using ADI's antenna geometry and factory complex channel correction. It keeps the existing single-TX capture mode. Factory correction is read only, before capture; failure leaves range processing available and direction unavailable.
 - Angle output is sensor-local and **mounting unverified**. Camera/LiDAR extrinsics and left/right orientation have not been measured. The angle heatmap is not a registered human location. No radar silhouettes are projected onto camera/map.

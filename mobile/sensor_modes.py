@@ -48,7 +48,7 @@ class SensorModes:
     def launch_radar(self):
         self.clear_export()
         with (self.root/'radar-worker.log').open('ab') as log:
-            self.process=self.popen([RADAR_PYTHON,'-I','radar_service.py','--near-range-m','5.0'],
+            self.process=self.popen([RADAR_PYTHON,'-I','radar_service.py','--near-range-m','3.0'],
                                     cwd=RADAR_DIR,stdout=log,stderr=subprocess.STDOUT)
 
     def recover_radar(self):
