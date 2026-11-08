@@ -95,3 +95,11 @@ The factory RX correction is read from the EEPROM directly in `tinyrad_dev.py`, 
 - **Measured, replay with this board's factory correction.** Seated person in the open (`radar-empty-one-empty-20261107-2322`): a bearing on 57/57 candidate seconds, p10..p90 4..9 deg; 0/59 candidate seconds in the empty minute.
 - **Measured, replay through a wooden door** (`door-cmd-20261107-234537`): withheld more often and much less steady, up to -23..20 deg within one minute. The person's true position was not logged, so accuracy there is **unverified**.
 - **Unverified:** left/right sign, zero offset against the camera, absolute accuracy, any behaviour through concrete or rubble (24 GHz is not expected to pass them).
+
+## Watch range and reported distance, updated 2026-11-08
+
+The phone app runs the radar at `--near-range-m 3.0`. With the room empty and the radar pointed at a concrete outside wall, the 5 m setting flagged a person 80/80 s, always from bins at 3.9-4.8 m, where the changing signal is many times the static echo (cause unverified).
+
+`assess()` now reports a bin that actually fired; it used to pick the best ratio among all bins in range, so a wobble detection could report an unrelated distance.
+
+**Measured, replay at 3 m:** that wall run 0/51 s, quiet empty room 0/41 s, seated in the open 41/41 s, seated behind a wooden door 86/86 s. One run each, not a general accuracy figure.

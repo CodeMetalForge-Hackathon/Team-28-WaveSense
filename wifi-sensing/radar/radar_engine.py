@@ -115,6 +115,7 @@ class RadarEngine:
         self._on = self._off = 0
         self.occupied = False
         self.frames_in = 0
+        self._last_fired = None
 
     # ---- input -----------------------------------------------------------------
     def feed(self, t: float, frame: np.ndarray) -> None:
@@ -226,6 +227,7 @@ class RadarEngine:
         self.bg_p = self.bg_m = None
         self._learn, self._bg_t = [], None
         self.occupied, self._on, self._off = False, 0, 0
+        self._last_fired = None
 
     def _adapt(self, bg: np.ndarray, x: np.ndarray, hit: np.ndarray, dt: float) -> np.ndarray:
         x = np.maximum(x, 1e-12)
@@ -328,7 +330,13 @@ class RadarEngine:
         elif self.occupied and self._off >= self.OFF_COUNT:
             self.occupied = False
         score = np.where(near, np.maximum(pr, mr), 0)
-        j = int(np.argmax(score))
+        # Report a bin that actually fired. A wobble bin can have a low ratio, so the best ratio overall
+        # may be a bin that did not fire. Hold-over seconds keep the last bin that did.
+        fired = pres_hit | mot_hit
+        if fired.any():
+            j = self._last_fired = int(np.argmax(np.where(fired, score, -1.0)))
+        else:
+            j = self._last_fired if self._last_fired is not None else int(np.argmax(score))
         moving = bool((mot_hit | pres_hit).any() and f["fast_share"][j] > self.FAST_SHARE)
         bpm, share = self.breathing(f["_X"], f["_T"], j) if (raw and not moving) else (None, 0.0)
         breathing_like = bool(not moving and share >= self.BREATH_SHARE)
