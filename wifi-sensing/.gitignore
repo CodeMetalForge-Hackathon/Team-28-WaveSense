@@ -37,3 +37,6 @@ __pycache__/
 
 # wifi-xray recordings and calibrations: RF data from people, never commit
 *.csirec
+
+# radar recordings: RF data from people, never commit
+*.radrec

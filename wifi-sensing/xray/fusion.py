@@ -45,3 +45,26 @@ def fuse(reports: dict) -> dict:
         state, basis = "no_candidate", f"0 of {len(judging)} links"
     return dict(state=state, basis=basis, label=LABELS[state], links_judging=sorted(judging),
                 candidate_links=cands, links_not_judging=idle)
+
+
+def combine(wifi_zone: dict, radar: dict | None) -> dict:
+    """Overall answer from the Wi-Fi zone summary and the radar report (radar_service status).
+
+    The radar sees still, breathing people and gives a range; Wi-Fi CSI only sees movement here
+    (measured 2026-11-07). So a radar candidate is a CANDIDATE, Wi-Fi movement alone is a WEAK
+    candidate, and when the radar is not judging the Wi-Fi summary stands alone.
+    """
+    rs = (radar or {}).get("state")
+    wifi_cand = wifi_zone.get("state") in ("candidate_present", "weak_candidate")
+    base = dict(wifi=wifi_zone.get("state"), radar=rs)
+    if rs not in ("candidate_present", "no_candidate"):
+        return dict(wifi_zone, sources=dict(base, note="radar not judging: Wi-Fi only"))
+    if rs == "candidate_present":
+        where = f"radar: {radar.get('kind') or 'candidate'} at ~{radar.get('range_m')} m"
+        return dict(state="candidate_present", basis=where + ("; Wi-Fi sees movement too" if wifi_cand else ""),
+                    label="CANDIDATE: verify. Not a confirmed person; range only; no count.",
+                    range_m=radar.get("range_m"), sources=base)
+    if wifi_cand:
+        return dict(state="weak_candidate", basis="Wi-Fi movement only; the radar sees nobody in its view",
+                    label=LABELS["weak_candidate"], sources=base)
+    return dict(state="no_candidate", basis="radar and Wi-Fi: no candidate", label=LABELS["no_candidate"], sources=base)

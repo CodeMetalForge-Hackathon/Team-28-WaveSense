@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from xray.csi_packet import parse_frame  # noqa: E402
 from xray.engine import Calibration, NearZoneEngine  # noqa: E402
-from xray.fusion import fuse  # noqa: E402
+from xray.fusion import combine, fuse  # noqa: E402
 
 REC = struct.Struct("<dH")
 LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
@@ -136,6 +136,8 @@ class FrontDoor:
         self.station_probe = station_probe
         self.stations: int | None = None
         self.last_frame_t: float | None = None
+        self.radar_url: str | None = None          # radar_service status (loopback), optional
+        self.radar: dict | None = None
         os.makedirs(cal_dir, mode=0o700, exist_ok=True)
 
     def cal_path(self, node: int) -> str:
@@ -183,12 +185,23 @@ class FrontDoor:
         if self.station_probe is not None:
             self.stations = self.station_probe()
 
+    def poll_radar(self) -> None:
+        if not self.radar_url:
+            return
+        try:
+            import urllib.request
+            with urllib.request.urlopen(self.radar_url, timeout=0.5) as r:
+                self.radar = json.loads(r.read(200_000)).get("radar")
+        except Exception:
+            self.radar = dict(state="no_data", detail="radar service not reachable")
+
     def assess_loop(self) -> None:
         ticks = 0
         while not self.stop.wait(1.0):
             if ticks % 5 == 0:
                 self.probe_link()
             ticks += 1
+            self.poll_radar()
             now = time.time()
             with self.lock:
                 for node, eng in self.engines.items():
@@ -244,7 +257,9 @@ class FrontDoor:
         with self.lock:
             link = dict(self.stats, stations=self.stations, last_frame_age_s=age,
                         hint=link_hint(self.stats, self.stations, age, self.iface or "the hotspot", self.port))
-            return dict(t=now, link=link, zone=fuse(self.reports), nodes={str(k): v for k, v in self.reports.items()},
+            wifi_zone = fuse(self.reports)
+            return dict(t=now, link=link, zone=combine(wifi_zone, self.radar), wifi_zone=wifi_zone, radar=self.radar,
+                        nodes={str(k): v for k, v in self.reports.items()},
                         recording=dict(path=self.recorder.path, datagrams=self.recorder.count) if self.recorder else None,
                         disclaimer="Experimental Wi-Fi sensing. CANDIDATE indications for a human to verify; "
                                    "no location, no count, not validated for life-safety use.")
@@ -260,7 +275,8 @@ let h='';for(const [n,r] of Object.entries(s.nodes)){h+=`<p>Node ${n}: <span cla
 `<small>link ${r.rate_hz??'-'} fps, coverage ${r.coverage??'-'}, RSSI ${r.rssi_dbm?.toFixed?.(0)??'-'} dBm; `+
 `motion ${r.motion??'-'}; breathing-like ${r.evidence?.breathing?'yes ~'+Math.round(r.breathing_bpm)+'/min':'no'}; `+
 `profile ${r.profile_distance??'-'} / ${r.profile_threshold??'-'}</small></p>`}
-const z=s.zone,hint=s.link.hint?`<p class=warn>${s.link.hint}</p>`:'';
+const z=s.zone,hint=s.link.hint?`<p class=warn>${s.link.hint}</p>`:'',rd=s.radar;
+h=(rd?`<p>Radar: <span class=c>${rd.state}</span><br><small>${rd.kind??''} ${rd.range_m!=null&&rd.state==='candidate_present'?'at ~'+rd.range_m+' m':''} presence ${rd.presence_ratio??'-'}x, motion ${rd.motion_ratio??'-'}x ${rd.detail??''}</small></p>`:'')+h;
 o.innerHTML=hint+(h?`<p>Zone: <span class=c>${z.state}</span> <small>(${z.basis})</small><br>${z.label}</p>`+h:'<p>No CSI node seen yet.</p>')+
 (s.recording?`<p class=warn>RECORDING ${s.recording.path} (${s.recording.datagrams} datagrams)</p>`:'')+
 `<small>${s.disclaimer}<br>link: ${JSON.stringify(s.link)}</small>`}
@@ -314,6 +330,8 @@ def main(argv=None):
     ap.add_argument("--cal-dir", default=os.path.expanduser("~/.config/wifi-xray"))
     ap.add_argument("--record", help="record from startup into this folder (stays on this Pi)")
     ap.add_argument("--label", default="session")
+    ap.add_argument("--radar", default="http://127.0.0.1:3101/status.json",
+                    help="radar_service status URL on loopback; 'none' to disable")
     ap.add_argument("--record-dir", default=os.path.expanduser("~/missions/csi"),
                     help="folder for recordings started over HTTP (POST /record/start?label=...)")
     a = ap.parse_args(argv)
@@ -334,6 +352,10 @@ def main(argv=None):
     door = FrontDoor(bind, a.port, allow, forward, os.path.expanduser(a.cal_dir), rec,
                      iface="" if a.bind else a.iface, station_probe=probe,
                      record_dir=os.path.expanduser(a.record) if a.record else os.path.expanduser(a.record_dir))
+    if a.radar != "none":
+        if not urlparse(a.radar).hostname in ("127.0.0.1", "localhost"):
+            raise SystemExit("--radar must be a loopback URL")
+        door.radar_url = a.radar
     httpd = make_http(door, a.http_port)
     for target in (door.udp_loop, door.assess_loop, httpd.serve_forever):
         threading.Thread(target=target, daemon=True).start()
