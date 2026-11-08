@@ -37,6 +37,24 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 Plug the radar into a USB 2.0 port; a powered hub is better, since this Pi has had power cuts.
 
+## Adaptive background (default since 2026-11-08)
+
+No calibration step. Per range bin, the service learns the scene's typical flicker in its first 15 s (it judges ~30 s after start), then keeps tracking it: the level falls within ~20 s when the scene gets quieter, follows rises over ~1 min while nobody is detected there, and only creeps up (15 min time constant) where a candidate is. A candidate is micro-motion above **6×** or motion above **10×** the tracked level, about 3× the empty-room p99 (measured: p99 ≈ 2× and 3× the median).
+
+| Replay of the 2026-11-07 recordings, no calibration at all | Result |
+|---|---|
+| empty room after learning | 0/31 s candidate |
+| seated still ~1 m | 57/60 s, first at +3 s; cleared 19 s after leaving |
+| seated still behind a wooden door | 95/95 s; quiet empty afterwards cleared after 20 s |
+
+Same as the manual calibration on these recordings (measured, in-sample: the parameters were set from these recordings). Synthetic tests: still person kept for 10 min, empty-room noise tripling over 3 min gives no candidate.
+
+- **Keep the area in front clear for the first ~30 s after start, and after a relearn.** Anything there is learned as background until it leaves.
+- `curl -X POST 127.0.0.1:3101/calibrate/start` relearns now (useful after moving the radar).
+- A fan or other moving thing in view stays a candidate for 15–30 min; point the radar away from it.
+- **Robot driving is not detected by the radar.** A person close to it disturbs the whole scene as much as motion does (scene coherence 0.29–0.71 measured with a person at ~1 m), so the "robot moving" signal has to come from the drive controller. Until then, judge only while the robot stands still.
+- `--fixed-calibration` restores the manual calibration mode.
+
 ## Running it
 
 ```bash

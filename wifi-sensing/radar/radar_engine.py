@@ -79,13 +79,27 @@ class RadarEngine:
     # walking puts Doppler far above the 12.5 Hz slow-time Nyquist, so it aliases across the band.
     FAST_HZ, FAST_SHARE = 3.0, 0.3
     BREATH_SHARE = 0.4             # share of 0.05-2 Hz displacement power in the breathing peak
+    # Adaptive background (default): no calibration step. Per range bin, the typical empty-scene level
+    # of micro-motion and motion energy is learned in the first LEARN_S seconds, then tracked in the
+    # log domain: it falls with TAU_DOWN, rises with TAU_UP while the bin is below threshold, and only
+    # leaks up with TAU_LEAK while the bin is above it, so a still person stays detected for many
+    # minutes (a constant source such as a fan is absorbed after ~15-30 min). Measured 2026-11-07:
+    # empty-room flicker drifted 2-5x over minutes, its p99 sat ~2x (micro-motion) and ~3x (motion)
+    # above its median, and a seated person read 110-365x at 0.6-1.5 m.
+    LEARN_S = 15
+    TAU_DOWN, TAU_UP, TAU_LEAK = 20.0, 60.0, 900.0
+    K_ADAPT_PRES, K_ADAPT_MOT = 6.0, 10.0      # ~3x the empty p99, as multiples of the tracked level
     ON_COUNT, OFF_COUNT = 3, 5     # hysteresis in assess() calls (~seconds)
 
     def __init__(self, range_axis: np.ndarray, calibration: RadarCalibration | None = None,
-                 near_range_m: float = 2.0):
+                 near_range_m: float = 2.0, adaptive: bool | None = None):
         self.r_axis = np.asarray(range_axis, float)
         self.bins = np.where((self.r_axis >= self.R_MIN) & (self.r_axis <= self.R_MAX))[0]
         self.cal, self.near = calibration, near_range_m
+        self.adaptive = (calibration is None) if adaptive is None else adaptive
+        self.bg_p = self.bg_m = None
+        self._learn: list = []
+        self._bg_t = None
         self._acc, self._acc_t = [], []
         self.buf = collections.deque(maxlen=int(self.WIN_S * 60))   # (t, complex bins x rx)
         self._calib: list | None = None
@@ -166,6 +180,22 @@ class RadarEngine:
         share = float(P[max(c - 1, 0):c + 2].sum() / max(P[wide].sum(), 1e-12))
         return float(f[c] * 60), share
 
+    # ---- adaptive background --------------------------------------------------------
+    def reset_background(self) -> None:
+        """Relearn the background from the next LEARN_S seconds (the manual 'calibrate' in adaptive mode)."""
+        self.bg_p = self.bg_m = None
+        self._learn, self._bg_t = [], None
+        self.occupied, self._on, self._off = False, 0, 0
+
+    def _adapt(self, bg: np.ndarray, x: np.ndarray, hit: np.ndarray, dt: float) -> np.ndarray:
+        x = np.maximum(x, 1e-12)
+        lb, lx = np.log(bg), np.log(x)
+        down = 1 - np.exp(-dt / self.TAU_DOWN)
+        up = 1 - np.exp(-dt / self.TAU_UP)
+        new = np.where(lx < lb, lb + down * (lx - lb),
+                       np.where(hit, np.minimum(lb + dt / self.TAU_LEAK, lx), lb + up * (lx - lb)))
+        return np.exp(new)
+
     # ---- calibration -------------------------------------------------------------
     def start_calibration(self) -> None:
         self._calib = []
@@ -195,15 +225,37 @@ class RadarEngine:
         if not f["valid"]:
             out.update(state="poor_link", detail="radar window not full yet")
             return out
-        if self.cal is None:
-            out.update(state="uncalibrated", detail="calibrate with nobody in the radar's view first")
-            return out
         rng = self.r_axis[self.bins]
-        pr = f["pres"] / np.maximum(np.array(self.cal.pres_p99), 1e-12)
-        mr = f["mot"] / np.maximum(np.array(self.cal.mot_p99), 1e-12)
         near = rng <= self.near
-        pres_hit = near & (pr > self.K_PRES)
-        mot_hit = near & (mr > self.K_MOT)
+        if self.adaptive:
+            out["mode"] = "adaptive"
+            if self.bg_p is None:
+                self._learn.append((f["pres"], f["mot"]))
+                if len(self._learn) < self.LEARN_S:
+                    out.update(state="learning", detail=f"learning this scene ({len(self._learn)}/{self.LEARN_S} s): "
+                                                         "keep the area in front of the radar clear")
+                    return out
+                self.bg_p = np.median([p for p, _ in self._learn], axis=0)
+                self.bg_m = np.median([m for _, m in self._learn], axis=0)
+                self._learn, self._bg_t = [], now
+            pr = f["pres"] / np.maximum(self.bg_p, 1e-12)
+            mr = f["mot"] / np.maximum(self.bg_m, 1e-12)
+            kp, km = self.K_ADAPT_PRES, self.K_ADAPT_MOT
+        else:
+            out["mode"] = "calibrated"
+            if self.cal is None:
+                out.update(state="uncalibrated", detail="calibrate with nobody in the radar's view first")
+                return out
+            pr = f["pres"] / np.maximum(np.array(self.cal.pres_p99), 1e-12)
+            mr = f["mot"] / np.maximum(np.array(self.cal.mot_p99), 1e-12)
+            kp, km = self.K_PRES, self.K_MOT
+        pres_hit = near & (pr > kp)
+        mot_hit = near & (mr > km)
+        if self.adaptive:
+            dt = max(now - (self._bg_t or now), 0.0) or 1.0
+            self._bg_t = now
+            self.bg_p = self._adapt(self.bg_p, f["pres"], pr > kp, dt)
+            self.bg_m = self._adapt(self.bg_m, f["mot"], mr > km, dt)
         raw = bool(pres_hit.any() or mot_hit.any())
         self._on, self._off = (self._on + 1, 0) if raw else (0, self._off + 1)
         if not self.occupied and self._on >= self.ON_COUNT:
@@ -216,7 +268,7 @@ class RadarEngine:
         bpm, share = self.breathing(f["_X"], f["_T"], j) if (raw and not moving) else (None, 0.0)
         breathing_like = bool(not moving and share >= self.BREATH_SHARE)
         kind = "moving" if moving else ("still, breathing-like" if breathing_like else "still, micro-motion")
-        far = (~near) & ((pr > self.K_PRES) | (mr > self.K_MOT))
+        far = (~near) & ((pr > kp) | (mr > km))
         out.update(state="candidate_present" if self.occupied else "no_candidate",
                    evidence=dict(micro_motion=bool(pres_hit.any()), motion_energy=bool(mot_hit.any()), moving=moving),
                    fast_share=round(float(f["fast_share"][j]), 2),
@@ -224,7 +276,7 @@ class RadarEngine:
                    breathing_bpm=round(bpm, 1) if breathing_like and bpm else None,
                    breathing_periodicity=round(share, 2),
                    presence_ratio=round(float(pr[j]), 2), motion_ratio=round(float(mr[j]), 2),
-                   threshold=self.K_PRES,
+                   threshold=kp,
                    candidate_ranges_m=[round(float(r), 1) for r in rng[pres_hit | mot_hit]],
                    beyond_near_ranges_m=[round(float(r), 1) for r in rng[far]][:8],
                    label=("CANDIDATE near the radar: verify. Not a confirmed person; range only, no count."

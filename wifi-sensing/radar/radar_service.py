@@ -3,8 +3,9 @@
 
     ~/tinyrad/venv/bin/python wifi-sensing/radar/radar_service.py            # HTTP 127.0.0.1:3101
     curl -s 127.0.0.1:3101/status.json
-    curl -X POST 127.0.0.1:3101/calibrate/start   # nobody in the radar's view, >= 60 s
-    curl -X POST 127.0.0.1:3101/calibrate/finish  # saves ~/.config/wifi-xray/radar1.json
+    curl -X POST 127.0.0.1:3101/calibrate/start   # adaptive (default): relearn the scene in 15 s
+                                                  # --fixed-calibration: start a manual calibration
+    curl -X POST 127.0.0.1:3101/calibrate/finish  # --fixed-calibration: save ~/.config/wifi-xray/radar1.json
     curl -X POST '127.0.0.1:3101/record/start?label=NAME' ; curl -X POST 127.0.0.1:3101/record/stop
 
 Recordings (~/missions/radar/*.radrec, repeated [f64 t][u16 n][u16 rx][n*rx int16]) stay on
@@ -78,10 +79,11 @@ def read_radrec(path: str):
 
 
 class RadarService:
-    def __init__(self, device, cal_path: str, record_dir: str, near_range_m: float, contract_file: str | None = None):
+    def __init__(self, device, cal_path: str, record_dir: str, near_range_m: float, contract_file: str | None = None,
+                 adaptive: bool = True):
         self.dev, self.cal_path, self.record_dir = device, cal_path, record_dir
-        cal = RadarCalibration.load(cal_path) if os.path.exists(cal_path) else None
-        self.eng = RadarEngine(device.range_axis(RadarEngine.NFFT), cal, near_range_m)
+        cal = RadarCalibration.load(cal_path) if (not adaptive and os.path.exists(cal_path)) else None
+        self.eng = RadarEngine(device.range_axis(RadarEngine.NFFT), cal, near_range_m, adaptive=adaptive)
         self.lock, self.stop = threading.Lock(), threading.Event()
         self.report: dict = dict(state="starting")
         self.rec = None
@@ -116,11 +118,17 @@ class RadarService:
 
     def calibrate_start(self) -> dict:
         with self.lock:
+            if self.eng.adaptive:
+                self.eng.reset_background()
+                return dict(ok=True, mode="adaptive", note=f"relearning the scene for {RadarEngine.LEARN_S} s: "
+                                                           "keep the area in front of the radar clear")
             self.eng.cal = None
             self.eng.start_calibration()
         return dict(ok=True, note="nobody in the radar's view (within its range) for at least 60 s")
 
     def calibrate_finish(self) -> dict:
+        if self.eng.adaptive:
+            return dict(ok=True, mode="adaptive", note="nothing to finish: the background is relearned automatically")
         with self.lock:
             try:
                 cal = self.eng.finish_calibration()
@@ -195,6 +203,8 @@ def main(argv=None):
     ap.add_argument("--cal", default=os.path.expanduser("~/.config/wifi-xray/radar1.json"))
     ap.add_argument("--record-dir", default=os.path.expanduser("~/missions/radar"))
     ap.add_argument("--near-range-m", type=float, default=2.0, help="candidates within this range count as near")
+    ap.add_argument("--fixed-calibration", action="store_true",
+                    help="use the saved manual calibration instead of the adaptive background")
     ap.add_argument("--contract-file", default=CONTRACT_DEFAULT,
                     help="WaveSense radar contract JSON, replaced atomically each second; 'none' to disable")
     a = ap.parse_args(argv)
@@ -204,13 +214,14 @@ def main(argv=None):
     contract = None if a.contract_file == "none" else a.contract_file
     if contract:
         os.makedirs(os.path.dirname(contract), mode=0o2775, exist_ok=True)
-    svc = RadarService(dev, a.cal, a.record_dir, a.near_range_m, contract)
+    svc = RadarService(dev, a.cal, a.record_dir, a.near_range_m, contract, adaptive=not a.fixed_calibration)
     httpd = make_http(svc, a.http_port)
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # stop cleanly
     for target in (svc.acquire, svc.assess_loop, httpd.serve_forever):
         threading.Thread(target=target, daemon=True).start()
-    print(f"radar: TinyRad sw {dev.version()}; HTTP 127.0.0.1:{a.http_port}; near zone <= {a.near_range_m} m", flush=True)
+    print(f"radar: TinyRad sw {dev.version()}; HTTP 127.0.0.1:{a.http_port}; near zone <= {a.near_range_m} m; "
+          f"{'adaptive background' if svc.eng.adaptive else 'fixed calibration'}", flush=True)
     try:
         while True:
             time.sleep(1)

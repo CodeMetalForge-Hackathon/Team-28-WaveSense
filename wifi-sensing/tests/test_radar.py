@@ -19,7 +19,7 @@ SLOPE = DEV.bandwidth / (DEV.n * 1e-6)
 N, FS_ADC, RATE = DEV.n, 1e6, 25.0
 
 
-def frame(t, rng, person_m=None, breath_hz=0.25, amp=40.0):
+def frame(t, rng, person_m=None, breath_hz=0.25, amp=40.0, noise=3.0):
     n = np.arange(N)[:, None]
     rx = np.arange(4)[None, :]
     def target(r, a, extra_phase=0.0):
@@ -29,13 +29,15 @@ def frame(t, rng, person_m=None, breath_hz=0.25, amp=40.0):
     if person_m is not None:
         d = 0.005 * np.sin(2 * np.pi * breath_hz * t)              # 5 mm chest motion
         x = x + target(person_m + d, amp, 4 * np.pi * d / DEV.wavelength)
-    return (x + rng.normal(0, 3.0, x.shape)).astype(np.int16)
+    return (x + rng.normal(0, noise, x.shape)).astype(np.int16)
 
 
-def run(eng, rng, t0, t1, **kw):
+def run(eng, rng, t0, t1, noise_fn=None, **kw):
     reps = []
     for k in range(int((t1 - t0) * RATE)):
         t = t0 + k / RATE
+        if noise_fn is not None:
+            kw["noise"] = noise_fn(t)
         eng.feed(t, frame(t, rng, **kw))
         if k % int(RATE) == 0:
             reps.append(eng.assess(t))
@@ -80,6 +82,41 @@ class RadarSynthetic(unittest.TestCase):
         first_clear = next(r["t"] - 240 for r in reps if r["state"] == "no_candidate")
         self.assertLess(first_clear, 20)
         self.assertEqual(reps[-1]["state"], "no_candidate")
+
+
+class RadarAdaptive(unittest.TestCase):
+    """No calibration step: the background is learned and tracked (SYNTHETIC frames)."""
+
+    def engine(self):
+        e = RadarEngine(DEV.range_axis(RadarEngine.NFFT))          # no calibration -> adaptive
+        e.DECIM = 1
+        return e
+
+    def test_learns_then_judges_and_tracks_slow_drift(self):
+        rng, e = np.random.default_rng(5), self.engine()
+        self.assertTrue(e.adaptive)
+        first = run(e, rng, 0, 40)
+        self.assertIn("learning", [r["state"] for r in first])
+        self.assertEqual(first[-1]["state"], "no_candidate")
+        drift = run(e, rng, 40, 220, noise_fn=lambda t: 3.0 * (1 + 2 * (t - 40) / 180))   # noise x3 over 3 min
+        self.assertNotIn("candidate_present", [r["state"] for r in drift])
+
+    def test_still_person_found_kept_for_10_min_then_cleared(self):
+        rng, e = np.random.default_rng(6), self.engine()
+        run(e, rng, 0, 40)
+        seated = run(e, rng, 40, 640, person_m=1.2)
+        first = next(r["t"] - 40 for r in seated if r["state"] == "candidate_present")
+        self.assertLess(first, 15)
+        self.assertTrue(all(r["state"] == "candidate_present" for r in seated if r["t"] > 40 + first + 5))
+        after = run(e, rng, 640, 700)
+        self.assertEqual(after[-1]["state"], "no_candidate")
+        self.assertLess(next(r["t"] - 640 for r in after if r["state"] == "no_candidate"), 30)
+
+    def test_relearn(self):
+        rng, e = np.random.default_rng(7), self.engine()
+        run(e, rng, 0, 40)
+        e.reset_background()
+        self.assertEqual(run(e, rng, 40, 42)[-1]["state"], "learning")
 
 
 class Contract(unittest.TestCase):
