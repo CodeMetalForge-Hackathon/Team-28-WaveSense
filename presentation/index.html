@@ -250,19 +250,21 @@
     margin: 0;
     overflow: hidden;
     position: relative;
+    background: #f3f0e6;
   }
   .s3 img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: center 62%;
-    filter: saturate(0.9) contrast(1.05);
+    object-fit: contain;
+    object-position: center;
+    padding: 6% 7% 10% 5%;
   }
   .s3 figure::after {
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, rgba(16,18,14,0.05), rgba(16,18,14,0.2) 70%, var(--bg));
+    background: linear-gradient(90deg, transparent 0 78%, var(--bg));
+    pointer-events: none;
   }
   .s3-copy {
     padding: 6.5% 8% 12% 2%;
@@ -616,7 +618,7 @@
 
     <section class="slide s3">
       <figure>
-        <img src="../photos/Vehicle-Top-View.jpg" alt="Top view of the scout: radar, power bank, Raspberry Pi 5, and RPLIDAR C1">
+        <img src="../photos/Whiteboard-Sketch.jpg" alt="Whiteboard sketch of the vehicle: lidar on top, camera, radar on the nose, Raspberry Pi, and batteries">
       </figure>
       <div class="s3-copy">
         <p class="kicker">The vehicle</p>
