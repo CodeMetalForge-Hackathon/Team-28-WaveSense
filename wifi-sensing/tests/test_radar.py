@@ -112,6 +112,19 @@ class RadarAdaptive(unittest.TestCase):
         self.assertEqual(after[-1]["state"], "no_candidate")
         self.assertLess(next(r["t"] - 640 for r in after if r["state"] == "no_candidate"), 30)
 
+    def test_person_present_at_power_on_is_not_learned_away(self):
+        rng, e = np.random.default_rng(8), self.engine()
+        self.assertIsNotNone(e.floor, "device_floor.json missing")
+        # the synthetic radar's noise floor differs from the real unit's, so scale the floor to it
+        cal = RadarEngine(DEV.range_axis(RadarEngine.NFFT)); cal.DECIM = 1
+        run(cal, rng, 0, 30)
+        e.floor = np.median([cal.features(29.9)["pres"]], axis=0)
+        reps = run(e, rng, 0, 120, person_m=1.0, amp=60.0)
+        first = next((r["t"] for r in reps if r["state"] == "candidate_present"), None)
+        self.assertIsNotNone(first, [r["state"] for r in reps])
+        self.assertLess(first, 35)
+        self.assertTrue(all(r["state"] == "candidate_present" for r in reps if r["t"] > first + 5), [r["state"] for r in reps])
+
     def test_relearn(self):
         rng, e = np.random.default_rng(7), self.engine()
         run(e, rng, 0, 40)

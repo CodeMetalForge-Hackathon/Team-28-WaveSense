@@ -49,7 +49,9 @@ No calibration step. Per range bin, the service learns the scene's typical flick
 
 Same as the manual calibration on these recordings (measured, in-sample: the parameters were set from these recordings). Synthetic tests: still person kept for 10 min, empty-room noise tripling over 3 min gives no candidate.
 
-- **Keep the area in front clear for the first ~30 s after start, and after a relearn.** Anything there is learned as background until it leaves.
+- **People in front at power-on are not learned away.** A learning-free "wobble" rule runs from the first second: a bin whose micro-motion power is > 30× this radar's own noise floor (`device_floor.json`, measured once from quiet periods of two scenes) **and** > 3× its own static echo power wobbles like a body, not like a wall, a door or noise. Bins it flags are excluded from the learning, and it stays on as a second detector. Replayed cold starts (measured, in-sample): person seated in the open at power-on detected from +17 s (as soon as the 10 s window fills), then continuously; person behind the door at power-on from +29 s, then continuously; empty starts as before. Alone, the wobble rule caught 100% of seconds seated in the open but only 60% behind the door, so the adaptive layer still matters.
+- The radar only sees in front of its antenna face. People behind or well beside the robot hardly register (not measured: check by walking behind it while watching the status).
+- `device_floor.json` belongs to this radar unit and these settings (N=256, 24.00–24.25 GHz). For another unit, re-measure it from a quiet empty minute.
 - `curl -X POST 127.0.0.1:3101/calibrate/start` relearns now (useful after moving the radar).
 - A fan or other moving thing in view stays a candidate for 15–30 min; point the radar away from it.
 - **Robot driving is not detected by the radar.** A person close to it disturbs the whole scene as much as motion does (scene coherence 0.29–0.71 measured with a person at ~1 m), so the "robot moving" signal has to come from the drive controller. Until then, judge only while the robot stands still.

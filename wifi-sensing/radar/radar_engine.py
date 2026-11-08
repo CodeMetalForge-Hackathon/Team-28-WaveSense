@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field
 
@@ -87,6 +88,13 @@ class RadarEngine:
     # empty-room flicker drifted 2-5x over minutes, its p99 sat ~2x (micro-motion) and ~3x (motion)
     # above its median, and a seated person read 110-365x at 0.6-1.5 m.
     LEARN_S = 15
+    # Learning-free "wobble" rule, active from the first second: a bin whose micro-motion power is
+    # both > WOBBLE_ABS x this radar's own noise floor (device_floor.json, measured once) and
+    # > WOBBLE_REL x its own static echo power wobbles like a body, not like a wall, a door or noise.
+    # Measured 2026-11-07 (two scenes): 0% of empty seconds, 100% seated in the open, 60% behind a door.
+    # Bins it flags are kept out of the adaptive learning, so people present at power-on are not learned.
+    WOBBLE_ABS, WOBBLE_REL = 30.0, 3.0
+    FLOOR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_floor.json")
     TAU_DOWN, TAU_UP, TAU_LEAK = 20.0, 60.0, 900.0
     K_ADAPT_PRES, K_ADAPT_MOT = 6.0, 10.0      # ~3x the empty p99, as multiples of the tracked level
     ON_COUNT, OFF_COUNT = 3, 5     # hysteresis in assess() calls (~seconds)
@@ -100,6 +108,7 @@ class RadarEngine:
         self.bg_p = self.bg_m = None
         self._learn: list = []
         self._bg_t = None
+        self.floor = self._load_floor()
         self._acc, self._acc_t = [], []
         self.buf = collections.deque(maxlen=int(self.WIN_S * 60))   # (t, complex bins x rx)
         self._calib: list | None = None
@@ -141,6 +150,7 @@ class RadarEngine:
         fp = np.abs(np.fft.fftfreq(int(m.sum()), 1 / rate))
         bandp = (fp >= self.PRES_BAND[0]) & (fp <= self.PRES_BAND[1])
         pres = Pp[bandp].sum(axis=0).mean(axis=-1) / m.sum()    # (bins,)
+        stat = (np.abs(X[m].mean(axis=0)) ** 2).mean(axis=-1)   # static echo power per bin
         Pm = Pp.mean(axis=-1)
         fast_share = Pm[fp >= self.FAST_HZ].sum(axis=0) / np.maximum(Pm[fp >= self.PRES_BAND[0]].sum(axis=0), 1e-12)
         k = max(3, int(self.MOTION_S * rate))
@@ -159,7 +169,7 @@ class RadarEngine:
                 c = idx[pk[j]]
                 peak_share[j] = Pb[max(c - 1, 0):c + 2, j].sum() / max(Pb[band, j].sum(), 1e-12)
         return dict(rate_hz=rate, coverage=coverage, pres=pres, mot=mot, breath_hz=breath_hz,
-                    peak_share=peak_share, fast_share=fast_share, valid=bool(coverage >= 0.7 and rate >= 10),
+                    peak_share=peak_share, fast_share=fast_share, stat=stat, valid=bool(coverage >= 0.7 and rate >= 10),
                     _X=X, _T=T)
 
     def breathing(self, X: np.ndarray, T: np.ndarray, j: int) -> tuple[float | None, float]:
@@ -179,6 +189,15 @@ class RadarEngine:
         c = np.where(bb)[0][np.argmax(P[bb])]
         share = float(P[max(c - 1, 0):c + 2].sum() / max(P[wide].sum(), 1e-12))
         return float(f[c] * 60), share
+
+    def _load_floor(self):
+        """Per-bin device noise floor of the micro-motion power, interpolated onto this range axis."""
+        try:
+            with open(self.FLOOR_FILE) as f:
+                d = json.load(f)
+            return np.interp(self.r_axis[self.bins], d["range_m"], d["floor"])
+        except (OSError, KeyError, ValueError):
+            return None
 
     # ---- adaptive background --------------------------------------------------------
     def reset_background(self) -> None:
@@ -227,16 +246,41 @@ class RadarEngine:
             return out
         rng = self.r_axis[self.bins]
         near = rng <= self.near
+        wob = np.zeros(len(self.bins), bool)
+        if self.floor is not None:
+            wob = (f["pres"] > self.WOBBLE_ABS * self.floor) & (f["pres"] > self.WOBBLE_REL * f["stat"])
         if self.adaptive:
             out["mode"] = "adaptive"
             if self.bg_p is None:
-                self._learn.append((f["pres"], f["mot"]))
+                self._learn.append((f["pres"], f["mot"], wob))
                 if len(self._learn) < self.LEARN_S:
-                    out.update(state="learning", detail=f"learning this scene ({len(self._learn)}/{self.LEARN_S} s): "
-                                                         "keep the area in front of the radar clear")
+                    # the wobble rule judges while the background is learned
+                    raw = bool((wob & near).any())
+                    self._on, self._off = (self._on + 1, 0) if raw else (0, self._off + 1)
+                    if not self.occupied and self._on >= self.ON_COUNT:
+                        self.occupied = True
+                    elif self.occupied and self._off >= self.OFF_COUNT:
+                        self.occupied = False
+                    jj = int(np.argmax(np.where(near & wob, f["pres"], 0)))
+                    out.update(state="candidate_present" if self.occupied else "learning",
+                               kind="person-like wobble" if self.occupied else None,
+                               range_m=round(float(rng[jj]), 2) if self.occupied else None,
+                               evidence=dict(wobble=raw), learning=f"{len(self._learn)}/{self.LEARN_S} s",
+                               detail="learning this scene; body-like wobble is judged meanwhile",
+                               label=("CANDIDATE near the radar: verify. Not a confirmed person; range only, no count."
+                                      if self.occupied else "Learning the scene (15 s)."))
                     return out
-                self.bg_p = np.median([p for p, _ in self._learn], axis=0)
-                self.bg_m = np.median([m for _, m in self._learn], axis=0)
+                P = np.array([p for p, _, _ in self._learn]); M = np.array([m for _, m, _ in self._learn])
+                W = np.array([w for _, _, w in self._learn])
+                Pm = np.where(W, np.nan, P); Mm = np.where(W, np.nan, M)
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)      # all-NaN bins are handled below
+                    bp, bm = np.nanmedian(Pm, axis=0), np.nanmedian(Mm, axis=0)
+                # a bin flagged in every learning second starts at its own level / threshold, so it is
+                # not instantly a candidate of the adaptive rule (the wobble rule still judges it)
+                self.bg_p = np.where(np.isnan(bp), np.median(P, axis=0) / self.K_ADAPT_PRES, bp)
+                self.bg_m = np.where(np.isnan(bm), np.median(M, axis=0) / self.K_ADAPT_MOT, bm)
                 self._learn, self._bg_t = [], now
             pr = f["pres"] / np.maximum(self.bg_p, 1e-12)
             mr = f["mot"] / np.maximum(self.bg_m, 1e-12)
@@ -249,13 +293,13 @@ class RadarEngine:
             pr = f["pres"] / np.maximum(np.array(self.cal.pres_p99), 1e-12)
             mr = f["mot"] / np.maximum(np.array(self.cal.mot_p99), 1e-12)
             kp, km = self.K_PRES, self.K_MOT
-        pres_hit = near & (pr > kp)
+        pres_hit = near & ((pr > kp) | wob)
         mot_hit = near & (mr > km)
         if self.adaptive:
             dt = max(now - (self._bg_t or now), 0.0) or 1.0
             self._bg_t = now
-            self.bg_p = self._adapt(self.bg_p, f["pres"], pr > kp, dt)
-            self.bg_m = self._adapt(self.bg_m, f["mot"], mr > km, dt)
+            self.bg_p = self._adapt(self.bg_p, f["pres"], (pr > kp) | wob, dt)
+            self.bg_m = self._adapt(self.bg_m, f["mot"], (mr > km) | wob, dt)
         raw = bool(pres_hit.any() or mot_hit.any())
         self._on, self._off = (self._on + 1, 0) if raw else (0, self._off + 1)
         if not self.occupied and self._on >= self.ON_COUNT:
@@ -270,7 +314,8 @@ class RadarEngine:
         kind = "moving" if moving else ("still, breathing-like" if breathing_like else "still, micro-motion")
         far = (~near) & ((pr > kp) | (mr > km))
         out.update(state="candidate_present" if self.occupied else "no_candidate",
-                   evidence=dict(micro_motion=bool(pres_hit.any()), motion_energy=bool(mot_hit.any()), moving=moving),
+                   evidence=dict(micro_motion=bool(pres_hit.any()), motion_energy=bool(mot_hit.any()), moving=moving,
+                                 wobble=bool((wob & near).any())),
                    fast_share=round(float(f["fast_share"][j]), 2),
                    range_m=round(float(rng[j]), 2), kind=kind if self.occupied else None,
                    breathing_bpm=round(bpm, 1) if breathing_like and bpm else None,
