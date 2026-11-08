@@ -89,6 +89,9 @@ class TinyRadDevice:
         if TOOL not in sys.path:
             sys.path.insert(0, TOOL)
         from src.cmd_modules.TinyRad import TinyRad  # noqa: E402  (ADI code)
+        from src.cmd_modules import Connection
+        from radar_threading import guard_vendor_signals
+        guard_vendor_signals(Connection)  # USB recovery runs in the acquisition thread.
         self.rad = TinyRad()
         self.rad.BrdRst()
         self.rad.RfRxEna()

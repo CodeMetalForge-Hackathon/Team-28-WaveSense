@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from radar_engine import RadarCalibration, RadarEngine  # noqa: E402
+from radar_recovery import RecoveryBackoff
 
 REC = struct.Struct("<dHH")
 CONTRACT_DEFAULT = "/srv/team28/runtime/radar/status.json"
@@ -95,9 +96,12 @@ class RadarService:
     def acquire(self) -> None:
         """Read frames forever. On a USB error (unplugged, power dip, re-enumeration) close the device,
         wait, and reopen it; the scene is then relearned, since gain and phase may have changed."""
+        recovery = RecoveryBackoff()
         while not self.stop.is_set():
             try:
                 for t, frame in self.dev.frames(self.stop):
+                    recovery.received(time.monotonic())
+                    self.error = None
                     with self.lock:
                         self.eng.feed(t, frame)
                         if self.rec:
@@ -110,20 +114,19 @@ class RadarService:
                 self.dev.close()
                 # back off: re-starting the radar draws a current surge, and on 2026-11-08 a radar start
                 # tripped the Pi's USB over-current protection and dropped the lidar and camera too
-                delays = iter([3.0, 10.0, 30.0])
-                while not self.stop.wait(next(delays, 60.0)):
+                while not self.stop.wait(recovery.failed()):
                     try:
                         self.dev.start()
                     except Exception as e2:
                         self.error = f"reconnecting: {type(e2).__name__}: {e2}"
+                        self.dev.close()
                         continue
                     with self.lock:
                         self.eng.buf.clear()
                         self.eng._acc, self.eng._acc_t = [], []
                         if self.eng.adaptive:
                             self.eng.reset_background()
-                    self.error = None
-                    print(time.strftime("%T"), "radar reconnected", flush=True)
+                    print(time.strftime("%T"), "radar reopened; awaiting frames", flush=True)
                     break
 
     def assess_loop(self) -> None:
@@ -245,12 +248,14 @@ def main(argv=None):
     httpd = make_http(svc, a.http_port)
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # stop cleanly
-    for target in (svc.acquire, svc.assess_loop, httpd.serve_forever):
-        threading.Thread(target=target, daemon=True).start()
+    # USB command/reply traffic must have one owner. Version query cannot race
+    # BrdGetData in the acquisition thread.
     try:
         version = dev.version()
     except Exception as e:
         version = f"unknown ({type(e).__name__})"
+    for target in (svc.acquire, svc.assess_loop, httpd.serve_forever):
+        threading.Thread(target=target, daemon=True).start()
     print(f"radar: TinyRad sw {version}; HTTP 127.0.0.1:{a.http_port}; near zone <= {a.near_range_m} m; "
           f"{'adaptive background' if svc.eng.adaptive else 'fixed calibration'}", flush=True)
     try:
