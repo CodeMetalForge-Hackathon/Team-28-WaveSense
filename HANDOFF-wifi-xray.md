@@ -68,7 +68,7 @@ cd ~/Team-28-wifi-xray/wifi-sensing && nohup python3 -m xray.receiver --iface wl
 ## Next steps, in order
 
 1. ~~Record the packet rate, RSSI and subcarrier count as measured facts.~~ Done 21:14 (README "Link facts").
-2. **Calibrate on site** with the near zone empty and the crowd present: `curl -X POST 127.0.0.1:3100/calibrate/start`, wait at least 90 s, then `/calibrate/finish`.
+2. ~~Calibrate on site~~ **Done 21:17:54–21:19:34**: the user confirmed the near zone clear, 30 s settle, 99 valid windows at 32.2 Hz, saved to `~/.config/wifi-xray/node1.json`. Thresholds: profile 4.0 (the floor; p95 1.05), breathing SNR 35.9 (p95 23.9), motion median 0.36. Right after, the empty zone read `no_candidate` 6 of 6 checks (app output, not an accuracy measurement). Recalibrate if the node, the Pi or the furniture moves. Original instructions: `curl -X POST 127.0.0.1:3100/calibrate/start`, wait at least 90 s, then `/calibrate/finish`.
 3. **Record labelled sessions with the two consenting teammates**, at least 3 min each: `empty-crowd-A`, `empty-crowd-B`, `one-seated-A`, `two-seated-A`, `two-seated-crowd-B`. Use `curl -X POST '127.0.0.1:3100/record/start?label=NAME'` and `/record/stop` on the running receiver (no restart needed; files go to `~/missions/csi/`). Recordings stay on the Pi and are never committed.
 4. `python3 -m xray.evaluate --calibrate <empty-A> --save /tmp/cal.json` then `--cal /tmp/cal.json <the others>`. Tune the thresholds in `engine.py` (class constants) from that data only. Fill the README results table, labelling every number measured / app output / inferred.
 5. Set up node 2, with the user's OK. Two links from different angles cut false candidates; fuse them by requiring agreement.
