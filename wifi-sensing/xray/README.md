@@ -9,7 +9,7 @@
 - **Movement near the link is detectable.** Walking through the link was flagged in 78% of judged windows (the rest are the 3 s hysteresis at the start), and the empty minutes next to it gave 0% candidates. Over all empty segments, false candidates were about 15%: movement *near* the zone counts too. The motion threshold was tuned on these recordings, so a fresh test is still needed.
 - Since 22:40 the engine only says CANDIDATE for movement or breathing-like evidence. A profile shift alone is reported as **CHANGED since calibration** (a person, a moved object or drift), never as a person.
 - About a third of the frames the node captures come from **other transmitters** on the channel. The engine keeps only frames within 3 dB of the running RSSI mode, which is the node's own link.
-- For still people (the first-responder case), use a dedicated sensor that measures breathing directly, such as mmWave radar. Single-link Wi-Fi CSI is not that sensor.
+- For still people (the first-responder case), use a dedicated sensor that measures breathing directly. **Since 23:20 the project has one: a 24 GHz TinyRad radar** (`../radar/README.md`). It found a seated still person in 95% of seconds, and through a wooden door in 95/95 s. Wi-Fi stays as a measured comparison and a movement layer.
 
 ## What it is for, and what it is not
 

@@ -42,7 +42,7 @@ xray front door: python3 -m xray.receiver --iface wlan1 --forward 127.0.0.1:5006
 status: curl -s 127.0.0.1:3100/status.json      page: http://localhost:3100 (forward the port)
 ```
 
-**After a reboot**, run these. You are in the `docker` group. The hotspot comes back by itself.
+**After a reboot**, run these. You are in the `docker` group. The hotspot comes back by itself. Also start the radar service (see "Radar" below).
 
 ```bash
 cd ~/Team-28 && nohup .venv/bin/python tools/power_log.py --every 1 >/dev/null 2>&1 &
@@ -56,6 +56,15 @@ cd ~/Team-28-wifi-xray/wifi-sensing && nohup python3 -m xray.receiver --iface wl
 - **BOOT button = download mode.** The user pressed BOOT on the ESP32 at about 21:08:36, and it sat silent in the ROM loader. `esptool --before no-reset --after hard-reset chip-id` did NOT reset it ("Stub flasher is already running" afterwards). **`esptool --port /dev/ttyACM0 --before no-reset --after watchdog-reset chip-id` did** (21:13). chip-id is on the allowed list.
 - **Measured link facts** (21:14, in the README "Link facts" table): 27.9 CSI frames/s, 52 subcarriers, RSSI -69 to -71 dBm, all datagrams forwarded to RuView; RuView `check_stream.sh` says VERIFIED.
 - `/dev/ttyUSB0` (CP2102N) is the robot's RPLIDAR C1, not the second ESP32. Never open it.
+
+## Radar (added 23:20, the main sensor now)
+
+- Hardware: Analog Devices **EV-TINYRAD24G** on USB (`064b:7823`), driven by ADI's TinyRadTool clone at `~/tinyrad/TinyRadTool`, venv `~/tinyrad/venv` (pyusb). The udev rule `/etc/udev/rules.d/99-tinyrad.rules` (plugdev) is installed.
+- Code: `wifi-sensing/radar/` (README there). Service: `cd wifi-sensing/radar && setsid nohup ~/tinyrad/venv/bin/python -I radar_service.py > ~/missions/radar-service.log 2>&1 &` (HTTP 127.0.0.1:3101). The receiver on 3100 combines both.
+- **Stop it only with `kill -TERM <exact pid>`.** Never use `pkill -f radar_service.py`: the pattern matches your own shell, and a killed stream left the radar answering nothing until a physical replug.
+- Results: seated still person 95% of seconds; through a wooden door 95/95 s at ~1.5 m; people moving within ~2 m trigger it; the breathing-rate estimate is unreliable (always ~9/min). Results page: `wifi-sensing/radar/results-2026-11-07.html`.
+- The user decided (23:37) to make the radar the product and keep Wi-Fi as a measured comparison.
+- **Run tests on the user's command words** ("calibrate", "sit", "empty", "done"), never on a schedule they did not confirm.
 
 ## Other open problems
 

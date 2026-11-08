@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar vs Wi-Fi person sensing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: one readable column; summary first, then the timeline, the test table, the limits. */
+:root {
+  --bg: #f4f5f6; --surface: #fcfcfb; --ink: #0f1419; --ink-2: #4a5360; --line: #d9dde2;
+  --accent: #2a78d6; --band: #e9ecef; --band-2: #dfe4ea; --warn: #fab219; --warn-ink: #7a5200;
+  --display: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --surface: #1a1a19; --ink: #eef0f2; --ink-2: #aab3bd; --line: #33383e;
+    --accent: #3987e5; --band: #23272b; --band-2: #2b3036; --warn: #fab219; --warn-ink: #fab219; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --surface: #1a1a19; --ink: #eef0f2; --ink-2: #aab3bd; --line: #33383e;
+  --accent: #3987e5; --band: #23272b; --band-2: #2b3036; --warn: #fab219; --warn-ink: #fab219; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; display: grid; gap: 28px; }
+h1, h2 { font-family: var(--display); font-weight: 600; letter-spacing: .01em; text-wrap: balance; margin: 0; }
+h1 { font-size: 2.1rem; line-height: 1.15; }
+h2 { font-size: 1.35rem; }
+p { margin: 0; max-width: 68ch; }
+.meta { color: var(--ink-2); font-size: .92rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 14px; }
+.verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.verdict { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; }
+.verdict.no { border-left-color: var(--ink-2); }
+.verdict b { font-family: var(--display); font-size: 1.15rem; font-weight: 600; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.chart-wrap { position: relative; }
+svg { width: 100%; height: auto; display: block; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: .82rem; line-height: 1.4; box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; min-width: 170px; }
+.legendline { display: flex; flex-wrap: wrap; gap: 18px; font-size: .85rem; color: var(--ink-2); }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 18px; height: 3px; background: var(--accent); border-radius: 2px; }
+.sw.dash { background: none; border-top: 2px dashed var(--ink-2); height: 0; }
+.sw.warn { height: 8px; background: var(--warn); }
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--ink-2); font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+td.num { white-space: nowrap; }
+.pill { display: inline-block; font-size: .75rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.pill.ok { border-color: var(--accent); color: var(--accent); }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; max-width: 72ch; }
+details summary { cursor: pointer; color: var(--ink-2); font-size: .9rem; }
+details summary:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 420px) { h1 { font-size: 1.7rem; } .card { padding: 14px; } }
+</style>
+</head>
+<body>
+<main>
+<header style="display:grid;gap:8px">
+  <h1>Radar vs Wi-Fi person sensing</h1>
+  <p class="meta">Team 28 · Raspberry Pi 5 · 7 Nov 2026, 21:00–23:52 EST · one room, one person per test. All figures are measured on these sessions unless labelled otherwise.</p>
+</header>
+
+<section class="verdicts" aria-label="Summary">
+  <div class="verdict"><b>Radar finds a still person</b><span>Seated still, 1 m away: flagged in 95% of seconds, first after <span class="num">3 s</span>.</span></div>
+  <div class="verdict"><b>Radar sees through a wooden door</b><span>Seated still behind it: flagged in all <span class="num">95/95 s</span>, at ~<span class="num">1.5 m</span>.</span></div>
+  <div class="verdict no"><b>Wi-Fi only sees movement</b><span>Walking flagged at <span class="num">+2 s</span>; a still person could not be told from an empty room.</span></div>
+</section>
+
+<section class="card" aria-labelledby="t1">
+  <h2 id="t1">Behind the door: radar signal, second by second</h2>
+  <p class="meta">Signal at the strongest range within 2 m, as a multiple of the empty-room level (log scale). A candidate needs 3× for 3 seconds in a row.</p>
+  <div class="legendline">
+    <span class="key"><span class="sw"></span>signal vs empty level</span>
+    <span class="key"><span class="sw dash"></span>threshold 3×</span>
+    <span class="key"><span class="sw warn"></span>candidate shown (strip under the chart)</span>
+  </div>
+  <div class="chart-wrap" id="wrap">
+    <svg id="chart" viewBox="0 0 900 380" role="img" aria-label="Radar signal over time during the door test, with periods shaded"></svg>
+    <div class="tip" id="tip" role="status" aria-live="polite"></div>
+  </div>
+  <details>
+    <summary>Table view of the periods</summary>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Period</th><th>Clock time</th><th>Candidate</th><th>Signal (median)</th></tr></thead>
+      <tbody>
+        <tr><td>Calibration, nobody behind the door</td><td class="num">23:45:37–23:46:09</td><td class="num">0 / 17 s</td><td class="num">0.6×</td></tr>
+        <tr><td>One person seated still behind the door</td><td class="num">23:46:46–23:48:21</td><td class="num">95 / 95 s</td><td class="num">2 600× at ~1.5 m</td></tr>
+        <tr><td>Empty, people moving in the background</td><td class="num">23:48:21–23:49:39</td><td class="num">77 / 77 s</td><td class="num">61×</td></tr>
+        <tr><td>Empty, quiet</td><td class="num">23:49:39–23:50:04</td><td class="num">21 / 25 s, cleared after 21 s</td><td class="num">4.5× → 1.4×</td></tr>
+        <tr><td>Empty, someone near the radar (inferred from 0.9 m readings)</td><td class="num">23:50:04–23:51:49</td><td class="num">56 / 105 s</td><td class="num">2.1×</td></tr>
+      </tbody>
+    </table></div>
+  </details>
+</section>
+
+<section class="card" aria-labelledby="t2">
+  <h2 id="t2">All tests</h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Sensor and test</th><th>Result</th><th>Empty room</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><b>Radar</b>, person seated still ~1 m away, no obstacle (23:23–23:24)</td><td>flagged <span class="num">57/60 s</span>, first at <span class="num">+3 s</span>, range <span class="num">0.9 m</span></td><td>clears ~<span class="num">18 s</span> after leaving, then 0.1–0.7×</td><td><span class="pill ok">works</span></td></tr>
+      <tr><td><b>Radar</b>, person seated still behind a wooden door (23:46–23:48)</td><td>flagged <span class="num">95/95 s</span>, ~<span class="num">1.5 m</span></td><td>quiet: clears in <span class="num">21 s</span>; people moving within ~2 m also trigger it</td><td><span class="pill ok">works, one run</span></td></tr>
+      <tr><td><b>Wi-Fi</b> (ESP32 CSI), person walking near the link (22:47–22:52, held out)</td><td>flagged at <span class="num">+2 s</span>, <span class="num">58/60 s</span> twice</td><td><span class="num">0/60 s</span> false; clears in 21–28 s</td><td><span class="pill ok">works</span></td></tr>
+      <tr><td><b>Wi-Fi</b>, person sitting still (22:09–22:23, alternating)</td><td>not separable from empty</td><td>a moved chair and drift shift the channel as much as a person</td><td><span class="pill">does not work</span></td></tr>
+      <tr><td><b>Radar</b> breathing-rate estimate</td><td>reads ~9 per minute in every period, empty ones too</td><td>it locks onto slow drift at its lowest frequency</td><td><span class="pill">unreliable</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="card" aria-labelledby="t3">
+  <h2 id="t3">What this does not show</h2>
+  <ul>
+    <li>A candidate means <b>look here</b>, not a confirmed person. <b>No candidate is not evidence that nobody is there.</b></li>
+    <li>24 GHz passes wood, cardboard, plastic and fabric; it is blocked by concrete, brick, stone and metal. This is not a test of rubble.</li>
+    <li>One radar gives range, not direction or count. Anyone moving within ~2 m of the radar, on either side of the door, also triggers it.</li>
+    <li>One room, one person, one evening. No long quiet-room false-alarm rate has been measured yet. Not validated for life-safety use.</li>
+    <li>Rough inference: with the door, the person read at ~1.5 m against ~0.9 m without it, and the signal stayed far above threshold, so the wooden door cost far less signal than the extra distance alone would predict. Not measured directly.</li>
+  </ul>
+  <p class="meta">Hardware: Analog Devices EV-TINYRAD24G (24.00–24.25 GHz FMCW, 4 receivers, 0.6 m range resolution) driven by ADI's TinyRadTool code; ESP32-C5 Wi-Fi CSI node with an external antenna. Code: branch <span class="num">wifi-xray/near-zone-presence</span>, folders <span class="num">wifi-sensing/radar</span> and <span class="num">wifi-sensing/xray</span>.</p>
+</section>
+</main>
+<script>
+const D = [[15.6,0.55,0,1.5,""],[16.6,0.83,0,1.2,""],[17.6,0.95,0,1.2,""],[18.6,1.01,0,1.2,""],[19.6,1.0,0,1.8,""],[20.6,0.85,0,1.8,""],[21.6,0.62,0,1.8,""],[22.6,0.59,0,0.6,""],[23.6,0.66,0,0.6,""],[24.6,0.19,0,1.5,""],[25.6,0.65,0,0.6,""],[26.6,0.54,0,0.6,""],[27.6,0.22,0,1.5,""],[28.6,0.26,0,1.5,""],[29.6,0.27,0,1.8,""],[30.6,0.36,0,1.8,""],[31.6,0.56,0,1.8,""],[32.6,0.92,0,1.8,""],[33.6,1.27,0,1.8,""],[34.6,0.73,0,0.9,""],[35.6,1.81,0,0.9,""],[36.6,10.54,1,0.9,"still, micro-motion"],[37.6,37.85,1,0.9,"still, micro-motion"],[38.6,75.56,1,0.9,"still, micro-motion"],[39.6,95.7,1,0.9,"still, micro-motion"],[40.6,80.58,1,0.9,"still, micro-motion"],[41.6,43.77,1,0.9,"still, micro-motion"],[42.6,13.82,1,0.9,"still, micro-motion"],[43.6,2.66,1,0.9,"still, micro-motion"],[44.6,0.88,1,1.8,"still, micro-motion"],[45.6,0.2,1,0.9,"still, micro-motion"],[46.7,0.17,1,1.2,"moving"],[47.7,0.22,1,1.2,"moving"],[48.7,0.42,1,0.9,"still, micro-motion"],[49.7,0.3,1,1.5,"moving"],[50.7,15.06,1,1.2,"still, micro-motion"],[51.7,194.48,1,1.2,"still, micro-motion"],[52.7,915.21,1,1.2,"moving"],[53.7,2489.2,1,1.2,"moving"],[54.7,4957.06,1,1.2,"moving"],[55.7,7983.54,1,1.2,"moving"],[56.7,18195.01,1,1.8,"moving"],[57.7,20377.7,1,1.8,"moving"],[58.7,20528.47,1,1.8,"still, breathing-like"],[59.7,18569.6,1,1.8,"still, breathing-like"],[60.7,14701.49,1,1.8,"still, breathing-like"],[61.7,10354.43,1,1.8,"still, breathing-like"],[62.7,6414.07,1,1.8,"still, breathing-like"],[63.7,3041.13,1,1.8,"still, breathing-like"],[64.7,1011.95,1,1.8,"still, breathing-like"],[65.7,240.35,1,1.8,"moving"],[66.8,35.32,1,1.8,"moving"],[67.8,23.53,1,1.8,"moving"],[68.8,17.83,1,1.8,"moving"],[69.8,13.58,1,1.8,"still, breathing-like"],[70.8,11.68,1,1.8,"still, micro-motion"],[71.8,11.54,1,1.8,"still, micro-motion"],[72.8,12.03,1,1.8,"still, micro-motion"],[73.8,12.86,1,1.8,"still, micro-motion"],[74.8,15.23,1,1.8,"still, micro-motion"],[75.8,19.74,1,1.8,"still, micro-motion"],[76.8,16.46,1,1.8,"still, breathing-like"],[77.8,15.58,1,1.8,"still, breathing-like"],[78.8,12.04,1,1.8,"still, breathing-like"],[79.8,7.78,1,1.8,"still, breathing-like"],[80.8,0.24,1,0.6,"still, micro-motion"],[81.8,4.75,1,0.6,"still, micro-motion"],[82.8,52.83,1,0.6,"still, micro-motion"],[83.8,185.05,1,0.6,"still, micro-motion"],[84.8,335.0,1,0.6,"still, micro-motion"],[85.8,367.44,1,0.6,"still, micro-motion"],[86.8,249.4,1,0.6,"still, breathing-like"],[87.8,261.37,1,0.6,"still, breathing-like"],[88.8,65.07,1,0.6,"still, breathing-like"],[89.8,6.42,1,0.6,"still, breathing-like"],[90.8,7.09,1,1.8,"still, breathing-like"],[91.8,8.11,1,1.8,"still, breathing-like"],[92.8,8.22,1,1.8,"still, breathing-like"],[93.8,7.62,1,1.8,"still, breathing-like"],[94.8,6.95,1,1.8,"still, breathing-like"],[95.8,6.65,1,1.8,"still, breathing-like"],[96.8,6.58,1,1.8,"still, micro-motion"],[97.8,5.9,1,1.8,"still, micro-motion"],[98.8,5.28,1,1.8,"still, micro-motion"],[99.8,5.13,1,1.8,"still, micro-motion"],[100.8,6.0,1,1.8,"still, micro-motion"],[101.8,7.72,1,1.8,"still, breathing-like"],[102.8,8.7,1,1.8,"still, breathing-like"],[103.8,8.26,1,1.8,"still, breathing-like"],[104.8,1.63,1,1.5,"still, micro-motion"],[105.8,79.55,1,1.5,"still, micro-motion"],[106.8,517.2,1,1.5,"still, micro-motion"],[107.8,737.96,1,1.2,"still, micro-motion"],[108.8,8301.61,1,1.8,"still, micro-motion"],[109.8,10903.0,1,1.8,"still, micro-motion"],[110.8,10090.44,1,1.8,"still, micro-motion"],[111.8,6870.45,1,1.8,"moving"],[112.9,4169.78,1,1.8,"moving"],[113.9,669.51,1,1.2,"moving"],[114.9,2277.31,1,1.2,"moving"],[115.9,10884.94,1,1.2,"still, micro-motion"],[116.9,19925.66,1,1.2,"still, micro-motion"],[117.9,40390.8,1,1.2,"still, micro-motion"],[118.9,42576.76,1,1.2,"still, micro-motion"],[119.9,32617.93,1,1.2,"still, micro-motion"],[120.9,21133.08,1,1.2,"moving"],[121.9,16481.61,1,1.2,"moving"],[122.9,22999.68,1,1.2,"moving"],[123.9,31970.24,1,1.2,"moving"],[124.9,74102.27,1,1.2,"moving"],[125.9,194394.22,1,1.8,"still, micro-motion"],[126.9,103467.13,1,1.2,"moving"],[127.9,97446.35,1,1.2,"moving"],[128.9,94009.15,1,1.2,"moving"],[129.9,99790.29,1,1.2,"still, breathing-like"],[130.9,108858.08,1,1.2,"still, breathing-like"],[131.9,108264.29,1,1.2,"still, breathing-like"],[132.9,93832.23,1,1.2,"still, breathing-like"],[133.9,79521.51,1,1.2,"moving"],[134.9,97782.84,1,1.2,"moving"],[135.9,156031.34,1,1.2,"moving"],[136.9,218481.32,1,1.2,"moving"],[137.9,244483.78,1,1.2,"moving"],[138.9,227927.78,1,1.2,"moving"],[139.9,189937.74,1,1.2,"moving"],[140.9,154171.99,1,1.2,"moving"],[141.9,123551.93,1,1.2,"moving"],[142.9,102411.77,1,1.8,"still, micro-motion"],[143.9,69479.97,1,1.5,"still, breathing-like"],[144.9,99921.06,1,1.8,"still, micro-motion"],[145.9,92369.44,1,1.8,"still, micro-motion"],[146.9,91996.15,1,1.8,"still, breathing-like"],[147.9,93994.43,1,1.8,"still, breathing-like"],[148.9,79416.05,1,1.8,"still, breathing-like"],[149.9,95686.02,1,1.8,"still, breathing-like"],[150.9,44999.28,1,1.8,"still, breathing-like"],[151.9,17278.21,1,1.8,"still, breathing-like"],[152.9,7164.82,1,1.8,"still, breathing-like"],[153.9,4089.75,1,1.8,"still, breathing-like"],[154.9,2854.77,1,1.8,"still, breathing-like"],[155.9,2630.65,1,1.2,"still, breathing-like"],[156.9,2372.71,1,1.2,"still, micro-motion"],[157.9,1657.61,1,1.2,"still, breathing-like"],[158.9,1041.79,1,1.2,"still, micro-motion"],[159.9,950.29,1,1.2,"still, micro-motion"],[160.9,1264.12,1,1.2,"still, micro-motion"],[162.0,2307.01,1,1.8,"still, micro-motion"],[163.0,3163.44,1,1.8,"still, micro-motion"],[164.0,3035.82,1,1.8,"still, micro-motion"],[165.0,2006.82,1,1.8,"still, micro-motion"],[166.0,859.53,1,1.8,"still, breathing-like"],[167.0,258.08,1,1.8,"still, breathing-like"],[168.0,4.89,1,0.9,"moving"],[169.0,9.97,1,0.9,"still, micro-motion"],[170.0,59.01,1,1.8,"moving"],[171.0,64.89,1,0.9,"still, micro-motion"],[172.0,96.23,1,0.9,"still, micro-motion"],[173.0,96.21,1,0.9,"still, micro-motion"],[174.0,65.53,1,0.9,"still, micro-motion"],[175.0,33.23,1,1.8,"still, breathing-like"],[176.0,25.28,1,1.8,"still, breathing-like"],[177.0,21.89,1,1.8,"still, micro-motion"],[178.0,21.74,1,1.8,"still, micro-motion"],[179.0,26.12,1,1.8,"still, breathing-like"],[180.0,38.27,1,1.8,"still, micro-motion"],[181.0,64.12,1,1.8,"still, micro-motion"],[182.0,78.49,1,1.8,"still, micro-motion"],[183.0,85.87,1,1.8,"still, micro-motion"],[184.0,88.91,1,1.8,"still, micro-motion"],[185.0,89.89,1,1.8,"still, micro-motion"],[186.0,86.98,1,1.8,"still, micro-motion"],[187.0,76.67,1,1.8,"still, micro-motion"],[188.0,65.13,1,1.8,"still, micro-motion"],[189.0,52.35,1,1.8,"still, micro-motion"],[190.0,45.86,1,1.8,"still, breathing-like"],[191.0,44.84,1,1.8,"still, breathing-like"],[192.0,49.57,1,1.8,"still, breathing-like"],[193.0,56.7,1,1.8,"still, breathing-like"],[194.0,61.21,1,1.8,"still, breathing-like"],[195.0,62.99,1,1.8,"still, breathing-like"],[196.0,64.63,1,1.8,"still, breathing-like"],[197.0,70.12,1,1.8,"still, breathing-like"],[198.0,83.11,1,1.8,"still, breathing-like"],[199.0,100.58,1,1.8,"still, breathing-like"],[200.0,115.32,1,1.8,"still, breathing-like"],[201.0,127.1,1,1.8,"still, breathing-like"],[202.0,139.99,1,1.8,"still, breathing-like"],[203.0,147.15,1,1.8,"still, breathing-like"],[204.0,138.9,1,1.8,"still, breathing-like"],[205.0,118.16,1,1.8,"still, breathing-like"],[206.0,98.05,1,1.8,"still, breathing-like"],[207.0,84.19,1,1.8,"still, breathing-like"],[208.0,70.97,1,1.8,"still, breathing-like"],[209.0,66.22,1,1.8,"still, micro-motion"],[210.1,76.47,1,1.8,"still, micro-motion"],[211.1,105.14,1,1.8,"still, micro-motion"],[212.1,6.03,1,0.6,"still, micro-motion"],[213.1,48.04,1,0.6,"still, micro-motion"],[214.1,114.44,1,1.8,"still, breathing-like"],[215.1,531.85,1,0.6,"still, micro-motion"],[216.1,809.14,1,0.6,"still, micro-motion"],[217.1,806.01,1,0.6,"still, micro-motion"],[218.1,529.66,1,0.6,"still, breathing-like"],[219.1,213.7,1,0.6,"still, breathing-like"],[220.1,45.59,1,0.6,"still, breathing-like"],[221.1,33.29,1,1.8,"still, breathing-like"],[222.1,40.34,1,1.8,"still, breathing-like"],[223.1,38.24,1,1.8,"still, breathing-like"],[224.1,30.75,1,1.8,"moving"],[225.1,20.83,1,1.8,"moving"],[226.1,11.7,1,1.8,"moving"],[227.1,2.24,1,1.2,"moving"],[228.1,1.19,1,1.2,"moving"],[229.1,1.75,1,1.2,"moving"],[230.1,1.9,1,1.2,"moving"],[231.1,2.29,1,1.2,"moving"],[232.1,3.35,1,1.2,"moving"],[233.1,5.17,1,1.2,"moving"],[234.1,7.34,1,1.2,"still, micro-motion"],[235.1,9.27,1,1.2,"still, micro-motion"],[236.1,10.28,1,1.2,"still, breathing-like"],[237.1,10.19,1,1.2,"still, breathing-like"],[238.1,9.37,1,1.2,"still, breathing-like"],[239.1,8.47,1,1.2,"moving"],[240.1,5.33,1,1.5,"moving"],[241.1,7.9,1,1.5,"still, breathing-like"],[242.1,13.3,1,1.8,"still, breathing-like"],[243.1,19.03,1,1.8,"still, breathing-like"],[244.1,8.43,1,1.8,"still, breathing-like"],[245.1,18.53,1,1.8,"still, micro-motion"],[246.1,14.47,1,1.8,"still, breathing-like"],[247.1,10.81,1,1.8,"still, breathing-like"],[248.1,8.23,1,1.8,"still, breathing-like"],[249.1,5.99,1,1.8,"still, breathing-like"],[250.1,5.07,1,1.8,"still, breathing-like"],[251.1,4.76,1,1.8,"still, breathing-like"],[252.2,4.8,1,1.8,"still, breathing-like"],[253.2,4.52,1,1.8,"still, breathing-like"],[254.2,4.02,1,1.8,"still, micro-motion"],[255.2,3.85,1,1.8,"still, micro-motion"],[256.2,4.4,1,1.8,"still, micro-motion"],[257.2,4.54,1,1.8,"still, micro-motion"],[258.2,3.98,1,1.8,"still, micro-motion"],[259.2,2.88,1,1.8,"still, micro-motion"],[260.2,2.18,1,1.8,"still, micro-motion"],[261.2,1.94,1,1.8,"still, micro-motion"],[262.2,1.65,1,1.8,"still, micro-motion"],[263.2,1.42,0,1.8,""],[264.2,1.44,0,1.8,""],[265.2,0.99,0,1.8,""],[266.2,0.22,0,0.9,""],[267.2,0.66,0,0.9,""],[268.2,8.75,1,0.9,"still, micro-motion"],[269.2,34.95,1,0.9,"still, micro-motion"],[270.2,71.79,1,0.9,"still, micro-motion"],[271.2,92.89,1,0.9,"still, micro-motion"],[272.2,80.02,1,0.9,"still, micro-motion"],[273.2,43.86,1,0.9,"still, micro-motion"],[274.2,13.31,1,0.9,"still, micro-motion"],[275.2,3.18,1,0.9,"still, micro-motion"],[276.2,1.21,1,1.2,"still, micro-motion"],[277.2,1.0,1,1.2,"still, micro-motion"],[278.2,1.13,1,1.2,"still, micro-motion"],[279.2,0.99,1,1.5,"still, micro-motion"],[280.2,1.09,0,1.5,""],[281.2,1.13,0,1.8,""],[282.2,1.88,0,1.8,""],[283.2,1.69,0,1.5,""],[284.2,2.31,0,1.8,""],[285.2,2.62,0,1.8,""],[286.2,2.84,0,1.8,""],[287.2,3.16,0,1.8,""],[288.2,3.35,0,1.8,""],[289.2,3.16,1,1.8,"still, micro-motion"],[290.2,2.14,1,1.5,"still, micro-motion"],[291.2,2.05,1,1.5,"still, breathing-like"],[292.2,2.58,1,1.8,"still, micro-motion"],[293.2,2.65,1,1.5,"still, micro-motion"],[294.2,2.98,1,1.5,"moving"],[295.2,3.51,1,1.8,"moving"],[296.2,3.22,1,1.8,"moving"],[297.2,2.84,1,1.8,"still, micro-motion"],[298.3,3.12,1,1.8,"moving"],[299.3,2.56,1,1.5,"still, breathing-like"],[300.3,2.47,1,1.5,"still, breathing-like"],[301.3,3.35,1,1.8,"still, breathing-like"],[302.3,3.88,1,1.8,"still, micro-motion"],[303.3,4.2,1,1.8,"still, micro-motion"],[304.3,3.9,1,1.8,"still, micro-motion"],[305.3,3.23,1,1.8,"still, micro-motion"],[306.3,2.31,1,1.5,"still, micro-motion"],[307.3,2.58,1,1.8,"still, micro-motion"],[308.3,2.79,1,1.8,"still, micro-motion"],[309.3,1.82,1,1.5,"still, micro-motion"],[310.3,2.08,1,1.8,"still, micro-motion"],[311.3,1.99,0,1.8,""],[312.3,1.99,0,1.8,""],[313.3,2.01,0,1.8,""],[314.3,2.14,0,1.8,""],[315.3,1.47,0,1.8,""],[316.3,1.02,0,1.8,""],[317.3,0.96,0,1.8,""],[318.3,0.57,0,1.2,""],[319.3,1.08,0,0.9,""],[320.3,1.01,0,0.9,""],[321.3,0.76,0,0.9,""],[322.3,0.73,0,1.2,""],[323.3,0.52,0,1.5,""],[324.3,0.68,0,1.5,""],[325.3,1.55,0,1.8,""],[326.3,2.38,0,1.8,""],[327.3,1.13,0,1.5,""],[328.3,1.01,0,1.5,""],[329.3,0.83,0,1.5,""],[330.3,1.18,0,1.8,""],[331.3,1.57,0,1.8,""],[332.3,1.9,0,1.8,""],[333.3,3.23,0,1.8,""],[334.3,1.55,0,1.8,""],[335.3,1.53,0,1.8,""],[336.3,0.97,0,1.8,""],[337.3,0.82,0,1.8,""],[338.3,0.84,0,1.8,""],[339.3,0.57,0,1.2,""],[340.3,0.46,0,1.2,""],[341.3,0.45,0,1.2,""],[342.4,0.48,0,1.5,""],[343.4,6.5,0,0.6,""],[344.4,66.65,0,0.6,""],[345.4,101.89,1,0.6,"still, breathing-like"],[346.4,258.03,1,0.6,"still, breathing-like"],[347.4,803.98,1,0.6,"still, micro-motion"],[348.4,330.4,1,0.6,"still, breathing-like"],[349.4,443.78,1,0.6,"still, breathing-like"],[350.4,161.76,1,0.6,"still, breathing-like"],[351.4,30.03,1,0.6,"still, breathing-like"],[352.4,1.41,1,0.6,"still, micro-motion"],[353.4,0.9,1,1.8,"still, micro-motion"],[354.4,1.11,1,1.8,"still, micro-motion"],[355.4,0.77,1,1.2,"still, micro-motion"],[356.4,1.07,0,1.8,""],[357.4,0.87,0,1.5,""],[358.4,0.9,0,1.5,""],[359.4,0.7,0,1.5,""],[360.4,0.74,0,1.5,""],[361.4,0.77,1,1.5,"moving"],[362.4,0.9,1,1.5,"moving"],[363.4,1.37,1,1.5,"moving"],[364.4,2.31,1,1.5,"moving"],[365.4,3.91,1,1.5,"moving"],[366.4,6.01,1,1.5,"moving"],[367.4,8.13,1,1.5,"still, breathing-like"],[368.4,13.45,1,1.8,"still, micro-motion"],[369.4,83.97,1,1.5,"still, micro-motion"],[370.4,161.02,1,1.5,"still, micro-motion"],[371.4,329.5,1,1.5,"still, breathing-like"]];   // [seconds from 23:45:37, signal ratio, candidate 0/1, range m, kind]
+const T0 = 23 * 3600 + 45 * 60 + 37;
+const periods = [
+  [0, 32, "calibration", 1], [32, 69, "setup", 0], [69, 164, "seated behind the door", 2],
+  [164, 242, "people moving nearby", 1], [242, 267, "quiet", 0], [267, 372, "someone near radar", 1]];
+const svg = document.getElementById("chart"), tip = document.getElementById("tip"), wrap = document.getElementById("wrap");
+const W = 900, H = 380, L = 56, R = 16, TOP = 40, B = 300, STRIP = 318;
+const xMax = 372, yMin = -1, yMax = 5.5;
+const x = s => L + (s / xMax) * (W - L - R);
+const y = v => B - ((Math.log10(Math.max(v, 0.1)) - yMin) / (yMax - yMin)) * (B - TOP);
+const clock = s => { const t = Math.round(T0 + s); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60; return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`; };
+const fmt = v => v >= 1000 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1);
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a, txt) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; svg.appendChild(e); return e; };
+const css = getComputedStyle(document.documentElement);
+function draw() {
+  svg.innerHTML = "";
+  const c = n => css.getPropertyValue(n).trim();
+  for (const [a, b, label, shade] of periods) {
+    el("rect", { x: x(a), y: TOP - 26, width: x(b) - x(a) - 2, height: B - TOP + 26, fill: shade === 2 ? c("--band-2") : shade === 1 ? c("--band") : "none", rx: 3 });
+    el("text", { x: x(a) + 6, y: TOP - 10, fill: c("--ink-2"), "font-size": 11.5, "font-family": c("--body") }, label);
+  }
+  for (let p = yMin; p <= 5; p++) {
+    el("line", { x1: L, x2: W - R, y1: y(10 ** p), y2: y(10 ** p), stroke: c("--line"), "stroke-width": 1 });
+    el("text", { x: L - 8, y: y(10 ** p) + 4, fill: c("--ink-2"), "font-size": 11.5, "text-anchor": "end", "font-family": c("--mono") }, p < 0 ? "0.1×" : p < 3 ? `${10 ** p}×` : `${10 ** (p - 3)}k×`);
+  }
+  el("line", { x1: L, x2: W - R, y1: y(3), y2: y(3), stroke: c("--ink-2"), "stroke-width": 1.5, "stroke-dasharray": "5 4" });
+  el("text", { x: W - R - 4, y: y(3) - 6, fill: c("--ink-2"), "font-size": 11.5, "text-anchor": "end", "font-family": c("--body") }, "threshold 3×");
+  const path = D.map((d, i) => `${i ? "L" : "M"}${x(d[0]).toFixed(1)},${y(d[1]).toFixed(1)}`).join("");
+  el("path", { d: path, fill: "none", stroke: c("--accent"), "stroke-width": 2, "stroke-linejoin": "round" });
+  el("text", { x: L, y: STRIP - 4, fill: c("--ink-2"), "font-size": 11, "font-family": c("--body") }, "");
+  for (const d of D) if (d[2]) el("rect", { x: x(d[0]) - 0.8, y: STRIP, width: 2.6, height: 10, fill: c("--warn") });
+  el("text", { x: L - 8, y: STRIP + 9, fill: c("--warn-ink"), "font-size": 11, "text-anchor": "end", "font-family": c("--body") }, "candidate");
+  for (let s = 0; s <= 360; s += 60) {
+    el("text", { x: x(s), y: STRIP + 34, fill: c("--ink-2"), "font-size": 11.5, "text-anchor": "middle", "font-family": c("--mono") }, clock(s).slice(0, 5) + (s % 60 ? "" : ""));
+  }
+  el("text", { x: x(372), y: STRIP + 52, fill: c("--ink-2"), "font-size": 11, "text-anchor": "end", "font-family": c("--body") }, "clock time (EST)");
+  const cross = el("line", { x1: 0, x2: 0, y1: TOP - 26, y2: STRIP + 10, stroke: c("--ink-2"), "stroke-width": 1, opacity: 0 });
+  const dot = el("circle", { r: 5, fill: c("--accent"), stroke: c("--surface"), "stroke-width": 2, opacity: 0 });
+  const hit = el("rect", { x: L, y: TOP - 26, width: W - L - R, height: STRIP + 10 - TOP + 26, fill: "transparent" });
+  const show = evt => {
+    const box = svg.getBoundingClientRect(); const px = (evt.clientX - box.left) * W / box.width;
+    const s = (px - L) / (W - L - R) * xMax; let best = D[0];
+    for (const d of D) if (Math.abs(d[0] - s) < Math.abs(best[0] - s)) best = d;
+    cross.setAttribute("x1", x(best[0])); cross.setAttribute("x2", x(best[0])); cross.setAttribute("opacity", .6);
+    dot.setAttribute("cx", x(best[0])); dot.setAttribute("cy", y(best[1])); dot.setAttribute("opacity", 1);
+    const per = periods.find(p => best[0] >= p[0] && best[0] < p[1]);
+    tip.innerHTML = `<b class="num">${clock(best[0])}</b> · ${per ? per[2] : ""}<br>signal <b class="num">${fmt(best[1])}×</b> empty level<br>${best[2] ? `candidate at ~<span class="num">${best[3]} m</span>${best[4] ? ` (${best[4]})` : ""}` : "no candidate"}`;
+    tip.style.display = "block";
+    const tx = (x(best[0]) / W) * box.width, left = tx > box.width * 0.62 ? tx - tip.offsetWidth - 12 : tx + 12;
+    tip.style.left = `${left}px`; tip.style.top = `${(TOP / H) * box.height}px`;
+  };
+  hit.addEventListener("pointermove", show);
+  hit.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); });
+}
+draw();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
+</body>
+</html>

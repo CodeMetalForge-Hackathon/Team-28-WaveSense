@@ -54,7 +54,10 @@ Point the radar's antenna side at the seats you want to watch, 1–1.5 m away. R
 | Recording 23:22–23:25: calibration on 23:22–23:23 (nobody in view) | 0 of 45 s candidate in the calibration minute | measured, in-sample |
 | 23:23–23:24: one person seated still at ~1 m | **candidate 57/60 s (95%), 100% after the first 10 s, first after 3 s, median range 0.9 m**; presence ~145× the empty level | measured |
 | 23:24–23:25: nobody, right after the person left | candidate 18/60 s; all of it is the person leaving and the 10 s window emptying; afterwards presence 0.1–0.7× (threshold 3×) | measured, held out |
-| breathing rate while seated | ~9 per minute | app output, **not checked against a real count** |
+| **behind a wooden door**, 23:45:37–23:51:49 (`door-cmd`): 32 s live calibration with nobody behind the door; marks by the user's words "sit" 23:46:46, "empty" 23:48:21 and again 23:49:39 | **seated still behind the door: candidate 95/95 s**, median signal 2 600× the empty level, at ~1.5 m. Empty with people moving in the background: 77/77 s (they trigger it). Empty and quiet: cleared 21 s after the mark, decaying to 1.4× | measured, one run |
+| breathing rate | reads ~9/min in **every** period, empty ones included: it locks onto slow drift at the lowest bin of its 20 s window | measured: **unreliable, do not show it as a vital sign**. The "breathing-like" label is unreliable for the same reason |
 | frame rate | 250 raw frames/s, averaged to 25 Hz, no DMA errors | measured |
 
-The 10 s presence window and the 5 s hysteresis were chosen after looking at this recording (a 20 s window took ~35 s to clear). A fresh held-out live test is still to be done.
+Results page: `results-2026-11-07.html` (also published as a private claude.ai artifact).
+
+The 10 s presence window and the 5 s hysteresis were chosen after looking at the first recording (a 20 s window took ~35 s to clear). A fresh held-out live test is still to be done.
