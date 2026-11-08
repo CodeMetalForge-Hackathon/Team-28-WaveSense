@@ -67,7 +67,8 @@ class Calibration:
 class NearZoneEngine:
     # decision thresholds: multiples of the calibration's own 95th percentile, with floors
     PROFILE_K, PROFILE_FLOOR = 2.0, 4.0
-    BREATH_K, BREATH_FLOOR, BREATH_CONSISTENCY = 1.5, 6.0, 0.5
+    # BREATH_FLOOR: pure-noise SNR measured median 11, p95 23, max 28 over 200 synthetic trials
+    BREATH_K, BREATH_FLOOR, BREATH_CONSISTENCY = 1.5, 30.0, 0.5
     MOTION_HIGH = 4.0             # motion / calibration median above which breathing is not judged
     ON_COUNT, OFF_COUNT = 3, 10   # hysteresis, in assess() calls (~seconds)
 

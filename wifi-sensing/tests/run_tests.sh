@@ -544,7 +544,7 @@ fi
 
 # ============================================================== python ====
 
-it "python: ruview_json unit tests"
+it "python: unit tests (ruview_json; wifi-xray, synthetic CSI, skipped without numpy)"
 OUT=$(PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$HERE" -p 'test_*.py' 2>&1)
 RC=$?
 expect_rc 0 && pass

@@ -96,9 +96,12 @@ def breathing(x: np.ndarray, fs: float, f_lo: float = 0.12, f_hi: float = 0.6,
     chosen = np.argsort(power[band].sum(axis=0))[-k:]
     filt = spec[:, chosen] * band[:, None]
     bp = np.fft.irfft(filt, n=n, axis=0)
-    u, s, _ = np.linalg.svd(bp - bp.mean(axis=0), full_matrices=False)
-    pc = u[:, 0] * s[0]
-    pspec = np.abs(np.fft.rfft(pc * np.hanning(n))) ** 2
+    _, _, vt = np.linalg.svd(bp - bp.mean(axis=0), full_matrices=False)
+    # Learn the breathing direction from the band-passed data, but measure the
+    # spectrum of the UNFILTERED signal along it: a band-passed series has no
+    # out-of-band power, which made the noise floor zero and the SNR meaningless.
+    full = xd[:, chosen] - xd[:, chosen].mean(axis=0)
+    pspec = np.abs(np.fft.rfft(full @ vt[0])) ** 2
     ib = np.flatnonzero(band)
     peak = ib[np.argmax(pspec[ib])]
     ref = (f >= 0.05) & (f <= 2.0)
