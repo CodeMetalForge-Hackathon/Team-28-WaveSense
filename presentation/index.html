@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WaveSense — Team 28</title>
+<style>
+  :root {
+    --bg: #10120e;
+    --ink: #f4f1e8;
+    --muted: #c2bbae;
+    --dim: #9a9488;
+    --line: rgba(244, 241, 232, 0.16);
+    --line-strong: rgba(244, 241, 232, 0.28);
+    --amber: #e4a23a;
+    --amber-soft: rgba(228, 162, 58, 0.14);
+    --green: #9dcc86;
+    --clay: #e0a08c;
+    --panel: rgba(244, 241, 232, 0.04);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #070806;
+    color: var(--ink);
+    font-family: "Avenir Next", "Avenir", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, body { font-family: inherit; }
+
+  .viewport {
+    height: 100%;
+    display: grid;
+    place-items: center;
+  }
+  .frame {
+    container-type: size;
+    width: min(100vw, calc(100vh * 16 / 9));
+    height: min(100vh, calc(100vw * 9 / 16));
+    position: relative;
+    background: var(--bg);
+    overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
+  }
+  .progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 3px;
+    width: 10%;
+    background: var(--amber);
+    z-index: 5;
+  }
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: none;
+    padding: 5.2% 4.8% 8.6%;
+    overflow: hidden;
+  }
+  .slide.active { display: grid; }
+
+  .kicker {
+    margin: 0 0 1.15cqw;
+    color: var(--amber);
+    font-size: 1.15cqw;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -0.03em; }
+  h1 {
+    margin: 0;
+    font-size: 8.4cqw;
+    line-height: 0.86;
+  }
+  h2 {
+    margin: 0 0 1.5cqw;
+    font-size: 3.55cqw;
+    line-height: 0.98;
+    max-width: 22ch;
+  }
+  h3 {
+    margin: 0.35cqw 0 0.45cqw;
+    font-size: 1.7cqw;
+    letter-spacing: -0.02em;
+  }
+  p { margin: 0; }
+  .lede {
+    margin-top: 1.8cqw;
+    max-width: 18ch;
+    color: var(--ink);
+    font-size: 1.85cqw;
+    line-height: 1.25;
+  }
+  .quiet {
+    color: var(--muted);
+    font-size: 1.28cqw;
+    line-height: 1.35;
+  }
+  .small {
+    color: var(--dim);
+    font-size: 1.02cqw;
+    line-height: 1.35;
+  }
+
+  .chrome {
+    position: absolute;
+    left: 4.8%;
+    right: 4.8%;
+    bottom: 2.6%;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5cqw;
+    color: var(--dim);
+    font-size: 1.02cqw;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  .chrome .dots { display: flex; gap: 0.45cqw; pointer-events: auto; }
+  .dot {
+    width: 0.55cqw;
+    height: 0.55cqw;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(244, 241, 232, 0.28);
+    cursor: pointer;
+  }
+  .dot.on { background: var(--amber); }
+  .nav {
+    position: static;
+    width: 1.6cqw;
+    height: 1.6cqw;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(244, 241, 232, 0.45);
+    font-size: 1.5cqw;
+    line-height: 1;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .nav:hover { color: var(--ink); }
+
+  /* Title — photo full-bleed, type over the left of the frame */
+  .s1 {
+    padding: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .s1 figure {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+  }
+  .s1 img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 70% 62%;
+    filter: saturate(0.9) contrast(1.05);
+  }
+  .s1 figure::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg,
+      rgba(16,18,14,0.94) 0%,
+      rgba(16,18,14,0.88) 28%,
+      rgba(16,18,14,0.45) 52%,
+      rgba(16,18,14,0.12) 72%,
+      rgba(16,18,14,0.28) 100%);
+  }
+  .s1-copy {
+    position: relative;
+    z-index: 1;
+    width: min(36cqw, 64%);
+    height: 100%;
+    padding: 6.5% 0 11% 6.5%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .s1 .brand {
+    width: 18cqw;
+    height: auto;
+    display: block;
+  }
+  .s1 h1 { font-size: 6.6cqw; }
+  .s1 .meta {
+    margin-top: 2.2cqw;
+    font-size: 1.25cqw;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .s1 .meta strong { color: var(--ink); font-weight: 600; }
+  .s1 .caption {
+    position: absolute;
+    right: 4.5%;
+    bottom: 11%;
+    z-index: 1;
+    color: var(--ink);
+    font-size: 1.05cqw;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-shadow: 0 1px 10px rgba(0,0,0,0.8);
+  }
+
+  /* Mission */
+  .s2 {
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    row-gap: 2.6cqw;
+  }
+  .s2 h2 { max-width: 28ch; font-size: 3.7cqw; }
+  .s2 .intro {
+    max-width: 78ch;
+    margin-bottom: 2cqw;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.4cqw;
+  }
+  .card {
+    min-height: 16cqw;
+    padding: 1.2cqw 1.2cqw 1.3cqw;
+    background: var(--panel);
+    border-top: 2px solid var(--amber);
+  }
+  .card .num {
+    color: var(--amber);
+    font-size: 1.05cqw;
+    letter-spacing: 0.16em;
+  }
+  .card p { color: var(--muted); font-size: 1.28cqw; line-height: 1.35; }
+
+  /* Vehicle */
+  .s3 {
+    padding: 0;
+    grid-template-columns: 46% 54%;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .s3 figure {
+    margin: 0;
+    overflow: hidden;
+    position: relative;
+    background: #f3f0e6;
+  }
+  .s3 img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    padding: 6% 7% 10% 5%;
+  }
+  .s3 figure::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0 78%, var(--bg));
+    pointer-events: none;
+  }
+  .s3-copy {
+    padding: 6.5% 8% 12% 2%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .s3 h2 { max-width: 16ch; }
+  .parts { list-style: none; margin: 0.4cqw 0 0; padding: 0; }
+  .parts li {
+    display: grid;
+    grid-template-columns: 11.5cqw 1fr;
+    gap: 0.8cqw;
+    padding: 0.72cqw 0;
+    border-top: 1px solid var(--line);
+    font-size: 1.22cqw;
+    line-height: 1.3;
+  }
+  .parts li:last-child { border-bottom: 1px solid var(--line); }
+  .parts span { color: var(--amber); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.95cqw; padding-top: 0.18cqw; }
+  .s3 .foot { margin-top: 1.1cqw; }
+
+  /* Loop */
+  .s4 {
+    grid-template-rows: auto auto;
+    align-content: center;
+    row-gap: 2.2cqw;
+  }
+  .s4 h2 { max-width: none; }
+  .beats {
+    align-self: start;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.1cqw;
+    min-height: 0;
+  }
+  .beat {
+    display: flex;
+    flex-direction: column;
+    padding: 1.15cqw 1.05cqw 1.2cqw;
+    background: var(--panel);
+    border-top: 2px solid var(--line-strong);
+  }
+  .beat:nth-child(4) { border-top-color: var(--amber); }
+  .beat .num {
+    color: var(--dim);
+    font-size: 1.02cqw;
+    letter-spacing: 0.14em;
+  }
+  .beat p { color: var(--muted); font-size: 1.18cqw; line-height: 1.32; }
+
+  /* Phone */
+  .s5 {
+    padding: 0;
+    grid-template-columns: 44% 56%;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .s5 figure {
+    margin: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .s5 img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 18% 42%;
+    filter: saturate(0.86) contrast(1.04);
+  }
+  .s5 figure::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(16,18,14,0.15), rgba(16,18,14,0.05) 40%, var(--bg));
+  }
+  .s5-copy {
+    padding: 6.2% 7% 12% 1%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .s5 h2 { max-width: 18ch; font-size: 3.15cqw; }
+  .rows { list-style: none; margin: 0.2cqw 0 0; padding: 0; }
+  .rows li {
+    padding: 0.78cqw 0;
+    border-top: 1px solid var(--line);
+    font-size: 1.24cqw;
+    line-height: 1.32;
+    color: var(--muted);
+  }
+  .rows li:last-child { border-bottom: 1px solid var(--line); }
+  .rows strong { color: var(--ink); font-weight: 600; }
+
+  /* Measured */
+  .s6 { grid-template-rows: auto 1fr auto; }
+  .s6 h2 { margin-bottom: 1.1cqw; max-width: none; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1.08cqw;
+    line-height: 1.25;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.95cqw;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 0 0.8cqw 0.55cqw 0;
+  }
+  td {
+    vertical-align: top;
+    padding: 0.42cqw 0.8cqw 0.42cqw 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+  }
+  td:first-child { color: var(--ink); width: 16%; }
+  td:last-child { width: 24%; color: var(--green); }
+  tr:last-child td { border-bottom: 1px solid var(--line); }
+  .s6 .note { margin-top: 0.9cqw; }
+
+  /* Limits */
+  .s7 {
+    grid-template-rows: auto auto auto;
+    align-content: center;
+    row-gap: 1.5cqw;
+  }
+  .s7 h2 { max-width: 24ch; margin-bottom: 1cqw; }
+  .lines { list-style: none; margin: 0; padding: 0; }
+  .lines li {
+    display: grid;
+    grid-template-columns: 2.2cqw 1fr;
+    gap: 0.7cqw;
+    padding: 0.62cqw 0;
+    border-top: 1px solid var(--line);
+    font-size: 1.38cqw;
+    line-height: 1.28;
+  }
+  .lines li:last-child { border-bottom: 1px solid var(--line); }
+  .lines span { color: var(--amber); }
+  .strip {
+    margin-top: 1.15cqw;
+    color: var(--dim);
+    font-size: 1.08cqw;
+    line-height: 1.35;
+    max-width: 110ch;
+  }
+
+  /* Wiring */
+  .s8 {
+    grid-template-rows: auto 1fr;
+  }
+  .s8 h2 { max-width: 22ch; }
+  .split {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 2cqw;
+    min-height: 0;
+  }
+  .flow {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.7cqw;
+  }
+  .node {
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
+    padding: 0.85cqw 1cqw;
+  }
+  .node b {
+    display: block;
+    font-size: 1.25cqw;
+    letter-spacing: 0.04em;
+  }
+  .node span {
+    display: block;
+    margin-top: 0.2cqw;
+    color: var(--muted);
+    font-size: 1.08cqw;
+    line-height: 1.3;
+  }
+  .arrow {
+    color: var(--amber);
+    letter-spacing: 0.14em;
+    font-size: 0.95cqw;
+    text-transform: uppercase;
+    padding-left: 0.2cqw;
+  }
+  .rules { list-style: none; margin: 0; padding: 0.2cqw 0 0; }
+  .rules li {
+    padding: 0.75cqw 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 1.22cqw;
+    line-height: 1.32;
+  }
+  .rules li:last-child { border-bottom: 1px solid var(--line); }
+
+  /* Demo */
+  .s9 { grid-template-rows: auto 1fr auto; }
+  .s9 h2 { max-width: 16ch; margin-bottom: 0.8cqw; }
+  .steps {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 1.6cqw;
+    min-height: 0;
+  }
+  ol.demo {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  ol.demo li {
+    display: grid;
+    grid-template-columns: 2.1cqw 1fr;
+    gap: 0.7cqw;
+    padding: 0.62cqw 0;
+    border-top: 1px solid var(--line);
+    font-size: 1.28cqw;
+    line-height: 1.3;
+    color: var(--muted);
+  }
+  ol.demo li:last-child { border-bottom: 1px solid var(--line); }
+  ol.demo span { color: var(--amber); }
+  .say {
+    align-self: center;
+    background: var(--amber-soft);
+    border-left: 3px solid var(--amber);
+    padding: 1.3cqw 1.3cqw;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .say .label {
+    color: var(--amber);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-size: 0.98cqw;
+    margin-bottom: 0.7cqw;
+  }
+  .say p {
+    font-size: 1.7cqw;
+    line-height: 1.25;
+  }
+  .fallback { margin-top: 0.9cqw; }
+
+  /* Close */
+  .s10 {
+    padding: 0;
+    grid-template-columns: 56% 44%;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .s10-copy {
+    padding: 6% 4.5% 11% 7%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .s10 h2 { max-width: 16ch; font-size: 3.2cqw; margin-bottom: 0.8cqw; }
+  .s10 .thanks {
+    margin: 0 0 1.3cqw;
+    max-width: 42ch;
+  }
+  .wins { list-style: none; margin: 0; padding: 0; }
+  .wins li {
+    display: grid;
+    grid-template-columns: 2cqw 1fr;
+    gap: 0.6cqw;
+    padding: 0.55cqw 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 1.16cqw;
+    line-height: 1.3;
+  }
+  .wins li:last-child { border-bottom: 1px solid var(--line); }
+  .wins span { color: var(--amber); }
+  .wins strong { color: var(--ink); font-weight: 600; }
+  .s10 .who {
+    margin-top: 1.2cqw;
+    color: var(--dim);
+    font-size: 1.05cqw;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .s10 figure {
+    margin: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .s10 img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 55% 58%;
+    filter: saturate(0.9) contrast(1.05);
+  }
+  .s10 figure::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, var(--bg) 0%, rgba(16,18,14,0.35) 16%, rgba(16,18,14,0.05) 42%);
+  }
+</style>
+</head>
+<body>
+<div class="viewport">
+  <div class="frame" id="frame">
+    <div class="progress" id="progress"></div>
+
+    <section class="slide s1 active">
+      <div class="s1-copy">
+        <img class="brand" src="brand/cm-logo-horizontal.svg" alt="Code Metal">
+        <div>
+          <p class="kicker">Forge Hackathon 2026</p>
+          <h1>WaveSense</h1>
+          <p class="lede">Send the scout in first. The operator stays on the phone.</p>
+          <p class="meta"><strong>Team 28</strong> · Sal, Oleh, Kristjan</p>
+          <p class="meta">Search and rescue · BASE-X, Boston</p>
+        </div>
+      </div>
+      <figure>
+        <img src="../photos/Vehicle-Three-Quarters-View.jpg" alt="Mecanum scout with a TinyRad 24 GHz radar mounted on the nose">
+        <figcaption class="caption">MasterPi · TinyRad on the nose</figcaption>
+      </figure>
+    </section>
+
+    <section class="slide s2">
+      <p class="kicker">The mission</p>
+      <h2>The first look should not require a person in the hazard.</h2>
+      <p class="quiet intro">Someone is missing. The space is dangerous, closed off, or still changing. Forge asked how responders locate people there. WaveSense is the look that happens before anyone walks in.</p>
+      <div class="cards">
+        <article class="card">
+          <div class="num">01 · Place</div>
+          <h3>Go where the network is gone</h3>
+          <p>A disadvantaged scene: degraded, inaccessible, or cut off. Minutes matter, and the usual picture is missing.</p>
+        </article>
+        <article class="card">
+          <div class="num">02 · Limit</div>
+          <h3>A cue is not a rescue</h3>
+          <p>The robot can show a picture, a map, and a range. A person still decides what it means.</p>
+        </article>
+        <article class="card">
+          <div class="num">03 · Scout</div>
+          <h3>Phone outside, vehicle inside</h3>
+          <p>A mecanum chassis, driven by hand, carrying a camera, a spinning lidar, and a 24 GHz radar.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide s3">
+      <figure>
+        <img src="../photos/Whiteboard-Sketch.jpg" alt="Whiteboard sketch of the vehicle: lidar on top, camera, radar on the nose, Raspberry Pi, and batteries">
+      </figure>
+      <div class="s3-copy">
+        <p class="kicker">The vehicle</p>
+        <h2>One chassis. Three senses that are actually on it.</h2>
+        <ul class="parts">
+          <li><span>Chassis</span> Hiwonder MasterPi, mecanum wheels, driven from a phone.</li>
+          <li><span>Brain</span> Raspberry Pi 5. Camera, map, sticks, and the radar status file.</li>
+          <li><span>Picture</span> USB camera, 640×480. Measured around 20–23 frames per second.</li>
+          <li><span>Map</span> Slamtec RPLIDAR C1. A full turn about 10 times a second.</li>
+          <li><span>Presence</span> Analog Devices TinyRad, 24.00–24.25 GHz, facing forward on the nose.</li>
+        </ul>
+        <p class="small foot">Saturday bring-up: duty 35 for 0.3 seconds, on the floor. It rolled forward a little and stopped.</p>
+      </div>
+    </section>
+
+    <section class="slide s4">
+      <div>
+        <p class="kicker">The loop</p>
+        <h2>Drive. See. Map. Flag.</h2>
+      </div>
+      <div class="beats">
+        <article class="beat">
+          <div class="num">01</div>
+          <h3>Drive</h3>
+          <p>The motor port stays closed until a stick moves. Release returns to stop. A 300 ms watchdog and a deadman cut the wheels if the link goes quiet. Losing the camera stops them too.</p>
+        </article>
+        <article class="beat">
+          <div class="num">02</div>
+          <h3>See</h3>
+          <p>The camera is the main view. Person boxes come from NanoDet on the Pi, a few times a second. They can lag the picture. They expire after 450 ms. Live accuracy was not measured.</p>
+        </article>
+        <article class="beat">
+          <div class="num">03</div>
+          <h3>Map</h3>
+          <p>The phone shows the live scan and a local map from the C1. Distances are from the scanner, not the bumper. It is one horizontal plane, and the map can drift.</p>
+        </article>
+        <article class="beat">
+          <div class="num">04</div>
+          <h3>Flag</h3>
+          <p>An amber chip reports a candidate and a range. Bio Radar can draw that cue on the camera. With no direction, it draws a band instead of a guessed spot. The cue hides while the robot is driving.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide s5">
+      <figure>
+        <img src="../photos/Android-Operator.jpg" alt="Operator driving the scout from a phone, with the vehicle on the bench behind the laptop">
+      </figure>
+      <div class="s5-copy">
+        <p class="kicker">The phone</p>
+        <h2>Full human operations with ML Classifications</h2>
+        <ul class="rows">
+          <li><strong>Camera, full frame.</strong> Tap swaps it with the lidar mini-view. The video connection stays up.</li>
+          <li><strong>White brackets</strong> come from the camera model. Bio Radar is a separate button.</li>
+          <li><strong>Bio Radar draws an orange cue</strong> and a range. No measured direction becomes a faint band that says direction unknown. The words on the blob are “Possible person.” That is a place to check.</li>
+          <li><strong>Motors stay disarmed</strong> until a stick moves. The speed slider caps the command. It is not measured ground speed.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide s6">
+      <div>
+        <p class="kicker">What we measured</p>
+        <h2>From this weekend...</h2>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Check</th><th>What happened</th><th>How to read it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>On the floor</td>
+            <td>Duty 35, 0.3 s. Rolled forward a little and stopped. The phone path arms only while a stick is held.</td>
+            <td>Measured Saturday. Latest full-duty cap was not a timed floor run.</td>
+          </tr>
+          <tr>
+            <td>All three, still</td>
+            <td>45 seconds: camera at least 22.4 fps, C1 at least 9.8 rev/s, radar advanced 11,045 frames, no reconnects.</td>
+            <td>Measured. Powered hub and a second supply. Wheels were not commanded.</td>
+          </tr>
+          <tr>
+            <td>Still person</td>
+            <td>Seated about 1 m in front: candidate 57 of 60 seconds, first at 3 seconds, median range 0.9 m.</td>
+            <td>One room, one person. Thresholds set on this data.</td>
+          </tr>
+          <tr>
+            <td>Wooden door</td>
+            <td>Still person behind the door: 95 of 95 seconds, about 1.5 m. People moving in the background also flagged it.</td>
+            <td>One run. The radar does not know what moved.</td>
+          </tr>
+          <tr>
+            <td>Empty</td>
+            <td>After learning, an empty replay was a candidate for 0 of 31 seconds. A quiet room cleared about 20 seconds after the person left.</td>
+            <td>Measured on those recordings. A clear result is not an empty building.</td>
+          </tr>
+          <tr>
+            <td>Direction</td>
+            <td>Replay of that seated person: a bearing on 57 of 57 candidate seconds, mostly 4° to 9°. None in the empty minute. Through the door it wandered, and the true spot was not logged.</td>
+            <td>Measured in the radar’s own frame. Left and right against the camera are not checked.</td>
+          </tr>
+          <tr>
+            <td>Person boxes</td>
+            <td>An OpenCV test image produced two visible-person detections. The live camera was pointed at the floor.</td>
+            <td>The pipeline draws boxes. Live accuracy is not measured.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="small note">7–8 November 2026. Radar figures are from one session and from replay. This is not a life-safety test.</p>
+    </section>
+
+    <section class="slide s7">
+      <div>
+        <p class="kicker">In the room</p>
+        <h2>Scanning details</h2>
+      </div>
+      <ol class="lines">
+        <li><span>01</span> A candidate means check it. It does not name a person.</li>
+        <li><span>02</span> No candidate leaves the room unproven. Silence is not clearance.</li>
+        <li><span>03</span> The door in the recording was wood. Concrete, masonry, and rubble stop 24 GHz.</li>
+        <li><span>04</span> Breathing rate stays off the phone. The estimator also sat near 9 a minute in empty periods.</li>
+        <li><span>05</span> Direction on the recording is real. The blob on the camera is not lined up yet. Left, right, and the camera field of view are still placeholders.</li>
+        <li><span>06</span> We judge presence with the robot stopped. Driving disturbs the whole scene.</li>
+      </ol>
+      <p class="strip">Also built, and not in this demo. Wi-Fi CSI flagged walking across one link at about 2 seconds, 58 of 60 seconds, and the first empty minute was clear. A still person was not separable, and the cue lingered after a walk. Livox 3D software is written; Ethernet had no carrier. Thermal saw a hand on Saturday and is not on the vehicle now.</p>
+    </section>
+
+    <section class="slide s8">
+      <div>
+        <p class="kicker">How it is wired</p>
+        <h2>The phone cannot invent a detection.</h2>
+      </div>
+      <div class="split">
+        <div class="flow">
+          <div class="node">
+            <b>Phone</b>
+            <span>Sticks, camera, map, amber chip. Tailscale to the Pi.</span>
+          </div>
+          <div class="arrow">Fresh stick input only</div>
+          <div class="node">
+            <b>Pi 5 console</b>
+            <span>One camera reader. One C1 reader, shared with the local map. Motor UART opens for a live stick and closes again. It only reads the radar file.</span>
+          </div>
+          <div class="arrow">Status file, younger than 2 seconds</div>
+          <div class="node">
+            <b>TinyRad process</b>
+            <span>Separate program. Owns the USB radar. Atomically replaces status.json. The console never writes it.</span>
+          </div>
+        </div>
+        <ul class="rules">
+          <li>A device showing up on USB is not a person in the room.</li>
+          <li>A stale or broken status file is dropped. Silence does not become a strong return.</li>
+          <li>Release either stick and the wheels are commanded to stop.</li>
+          <li>The radar chip hides during a drive command, and for 3 seconds after.</li>
+          <li>Camera, lidar, and radar together tripped the Pi's own USB ports. The working run used a powered hub and a second supply.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide s9">
+      <div>
+        <p class="kicker">The demo</p>
+        <h2>In this order.</h2>
+      </div>
+      <div class="steps">
+        <ol class="demo">
+          <li><span>01</span> Open the phone. Camera is live. Motors are disarmed until a stick moves.</li>
+          <li><span>02</span> Drive a short path. Let go. It stops.</li>
+          <li><span>03</span> Swap to the map. Say it is the lidar's plane around the robot, not a floor plan of the building.</li>
+          <li><span>04</span> Stop. A person sits in front of the nose. If the radar is healthy, the amber range appears.</li>
+          <li><span>05</span> Read the sentence on the right, and leave it there.</li>
+        </ol>
+        <div class="say">
+          <div class="label">Say this</div>
+          <p>Possible person, about N metres. A place to check. Not identified. Left and right are not calibrated. The robot is stopped.</p>
+        </div>
+      </div>
+      <p class="quiet fallback">If the radar does not answer USB, show drive, camera, and the map. Say the radar is down. Unplug it for five seconds and replug. That has brought it back. Do not invent a cue.</p>
+    </section>
+
+    <section class="slide s10">
+      <div class="s10-copy">
+        <p class="kicker">Thank you</p>
+        <h2>Thank you for an amazing weekend.</h2>
+        <p class="quiet thanks">For the floor, the sensors, the mentors, and a search-and-rescue problem that had to work in the room.</p>
+        <ol class="wins">
+          <li><span>01</span> <span><strong>We drove it from a phone.</strong> The scout rolled, and it stops when the stick comes back.</span></li>
+          <li><span>02</span> <span><strong>Camera, map, and radar ran together</strong> while the robot was still.</span></li>
+          <li><span>03</span> <span><strong>A still person became a range cue,</strong> in the open and behind one wooden door.</span></li>
+          <li><span>04</span> <span><strong>Direction held within a few degrees</strong> on that recording. The camera cue will not invent a spot when direction is missing.</span></li>
+        </ol>
+        <p class="who">Team 28 · Sal, Oleh, Kristjan</p>
+      </div>
+      <figure>
+        <img src="../photos/Vehicle-Side-View.jpg" alt="Side view of the WaveSense scout: mecanum wheels, lidar, and the radar on the nose">
+      </figure>
+    </section>
+
+    <div class="chrome">
+      <button class="nav prev" id="prev" aria-label="Previous slide">‹</button>
+      <span>WaveSense</span>
+      <div class="dots" id="dots"></div>
+      <span id="count">01 / 10</span>
+      <button class="nav next" id="next" aria-label="Next slide">›</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var progress = document.getElementById("progress");
+  var count = document.getElementById("count");
+  var dots = document.getElementById("dots");
+  var i = 0;
+
+  slides.forEach(function (_, idx) {
+    var b = document.createElement("button");
+    b.className = "dot";
+    b.type = "button";
+    b.setAttribute("aria-label", "Slide " + (idx + 1));
+    b.addEventListener("click", function () { show(idx); });
+    dots.appendChild(b);
+  });
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, idx) { s.classList.toggle("active", idx === i); });
+    var dotNodes = dots.querySelectorAll(".dot");
+    Array.prototype.forEach.call(dotNodes, function (d, idx) {
+      d.classList.toggle("on", idx === i);
+    });
+    count.textContent = String(i + 1).padStart(2, "0") + "  /  " + String(slides.length).padStart(2, "0");
+    progress.style.width = ((i + 1) / slides.length * 100) + "%";
+    if (location.hash !== "#" + (i + 1)) {
+      history.replaceState(null, "", "#" + (i + 1));
+    }
+  }
+
+  function next() { show(i + 1); }
+  function prev() { show(i - 1); }
+
+  document.getElementById("next").addEventListener("click", next);
+  document.getElementById("prev").addEventListener("click", prev);
+  document.addEventListener("keydown", function (e) {
+    var k = e.key;
+    if (k === "ArrowRight" || k === "ArrowDown" || k === "PageDown" || k === " ") {
+      e.preventDefault();
+      next();
+    } else if (k === "ArrowLeft" || k === "ArrowUp" || k === "PageUp") {
+      e.preventDefault();
+      prev();
+    } else if (k === "Home") {
+      e.preventDefault();
+      show(0);
+    } else if (k === "End") {
+      e.preventDefault();
+      show(slides.length - 1);
+    } else if (k === "f" || k === "F") {
+      var node = document.getElementById("frame");
+      if (!document.fullscreenElement) {
+        (node.requestFullscreen || node.webkitRequestFullscreen).call(node);
+      } else if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  });
+
+  var startX = 0;
+  document.getElementById("frame").addEventListener("touchstart", function (e) {
+    startX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  document.getElementById("frame").addEventListener("touchend", function (e) {
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) > 40) {
+      if (dx < 0) next();
+      else prev();
+    }
+  }, { passive: true });
+
+  var fromHash = parseInt(location.hash.replace("#", ""), 10);
+  show(fromHash >= 1 && fromHash <= slides.length ? fromHash - 1 : 0);
+})();
+</script>
+</body>
+</html>
