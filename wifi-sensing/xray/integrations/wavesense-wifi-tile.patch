@@ -1,0 +1,53 @@
+--- a/camera_preview.py	2026-11-07 20:32:04.260967337 -0500
++++ b/camera_preview.py	2026-11-07 20:32:04.276947380 -0500
+@@ -24,6 +24,23 @@
+ from urllib.request import Request, urlopen
+ 
+ ROOT = Path(__file__).resolve().parent
++# wifi-xray near-zone receiver (Team-28 branch wifi-xray/near-zone-presence). Loopback, no token.
++XRAY_URL = 'http://127.0.0.1:3100/status.json'
++
++
++def xray_status():
++    """Near-sensor CANDIDATE summary from wifi-xray: bounded, no raw CSI, nothing secret."""
++    try:
++        with urlopen(XRAY_URL, timeout=1) as response:
++            s = json.loads(response.read(200_000))
++    except Exception:
++        return {'online': False, 'reason': 'wifi-xray receiver not running'}
++    zone, link = s.get('zone') or {}, s.get('link') or {}
++    nodes = {str(n): {k: r.get(k) for k in ('state', 'rate_hz', 'rssi_dbm', 'evidence')}
++             for n, r in (s.get('nodes') or {}).items() if isinstance(r, dict)}
++    return {'online': True, 'state': zone.get('state'), 'basis': zone.get('basis'), 'label': zone.get('label'),
++            'hint': link.get('hint'), 'frames': link.get('csi_frames') or 0, 'nodes': nodes,
++            'disclaimer': s.get('disclaimer')}
+ WATCHDOG = 0.30
+ MAX_DUTY = 35.0
+ SIGNS = {1: -1, 2: 1, 3: -1, 4: 1}
+@@ -258,9 +275,11 @@
+                                   headers={'Authorization': 'Bearer ' + token})
+                 with urlopen(request, timeout=1) as response:
+                     data = json.loads(response.read(2_000_000))
+-                self.wifi = {'online': True, 'updated': time.time(), 'experimental': True, 'nodes': data}
++                wifi = {'online': True, 'updated': time.time(), 'experimental': True, 'nodes': data}
+             except Exception:
+-                self.wifi = {'online': False, 'reason': 'RuView stream or API access unavailable'}
++                wifi = {'online': False, 'reason': 'RuView stream or API access unavailable'}
++            wifi['xray'] = xray_status()
++            self.wifi = wifi
+             time.sleep(1)
+ 
+     def status(self, session):
+--- a/live.js	2026-11-07 20:32:04.261042744 -0500
++++ b/live.js	2026-11-07 20:32:04.277049843 -0500
+@@ -9,7 +9,9 @@
+   const offline=(label,reason='Connecting')=>'<div class="feed-offline"><span class="offline-symbol">⌁</span><span>'+label+'</span><small>'+esc(reason)+'</small></div>';
+   function find(obj,key){if(!obj||typeof obj!=='object')return null;if(key in obj)return obj[key];for(const v of Object.values(obj)){if(v&&typeof v==='object'){const r=find(v,key);if(r!==null)return r}}return null}
+   function media(kind){return '<div class="feed-shell reconnecting" data-sensor="'+kind+'"><img class="live-feed" alt="Live '+kind+' feed"><div class="feed-recover"><span>Connecting</span><small></small></div><span class="stream-age"></span></div>'}
+-  function wifi(){const s=status?.wifi;if(!s?.online)return offline('Wi-Fi',s?.reason||'Connecting');const motion=find(s.nodes,'motion_level');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>CSI connected</b><span>'+esc(motion||'Receiving real CSI data')+'</span><small>Experimental · no calibrated position</small></div>'}
++  const XRAY_TEXT={candidate_present:'CANDIDATE: verify',weak_candidate:'WEAK CANDIDATE: verify',no_candidate:'No candidate',not_judging:'Not judging'};
++  function xray(x){if(!x.frames)return offline('Wi-Fi',x.hint||'No CSI from the ESP32 yet');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>'+esc(XRAY_TEXT[x.state]||x.state||'-')+'</b><span>'+esc(x.hint||x.label||'')+'</span><small>Near-sensor check only · no location · no count · '+esc(x.basis||'')+'</small></div>'}
++  function wifi(){const s=status?.wifi;if(s?.xray?.online)return xray(s.xray);if(!s?.online)return offline('Wi-Fi',s?.reason||'Connecting');const motion=find(s.nodes,'motion_level');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>CSI connected</b><span>'+esc(motion||'Receiving real CSI data')+'</span><small>Experimental · no calibrated position</small></div>'}
+   function lidar(){return LidarView.render()}
+   function bindMedia(){app.querySelectorAll('.feed-shell').forEach(shell=>{
+     const kind=shell.dataset.sensor,img=shell.querySelector('img'),overlay=shell.querySelector('.feed-recover');const s=status?.[kind],online=!!s?.online;

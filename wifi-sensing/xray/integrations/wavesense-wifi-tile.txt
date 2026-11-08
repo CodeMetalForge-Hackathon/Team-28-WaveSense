@@ -1,0 +1,32 @@
+WaveSense Wi-Fi tile: show the wifi-xray near-sensor CANDIDATE status
+(from the Team-28 branch wifi-xray/near-zone-presence, 2026-11-07)
+
+WHAT IT CHANGES (2 files, about 25 lines)
+- camera_preview.py: wifi_poll() also reads http://127.0.0.1:3100/status.json
+  (the wifi-xray receiver, loopback only, no token) and adds a bounded summary
+  as status.wifi.xray: zone state, label, hint, frame count, per-node state.
+  RuView polling is unchanged.
+- live.js: when wifi-xray is running, the Wi-Fi tile shows its state:
+    "CANDIDATE: verify" / "WEAK CANDIDATE: verify" / "No candidate" / "Not judging"
+  with "Near-sensor check only · no location · no count".
+  While no CSI frames arrive, the tile shows OFFLINE plus the reason (for example
+  "No device has joined the hotspot..."), never a false LIVE.
+  If wifi-xray is not running, the tile behaves exactly as before.
+
+APPLY (as the app owner)
+  cd /srv/team28/wavesense-mobile
+  patch -p1 --dry-run < /srv/team28/patches/wifi-xray-tile.patch
+  patch -p1 < /srv/team28/patches/wifi-xray-tile.patch
+  then restart the server the usual way (./start.sh).
+Undo: patch -p1 -R < /srv/team28/patches/wifi-xray-tile.patch
+
+CHECKED
+- python3 -m py_compile camera_preview.py and node --check live.js pass.
+- xray_status() read the live receiver correctly and returns
+  {'online': False, ...} when it is not running.
+- Tile rendering was exercised in node for every state, including HTML escaping.
+- NOT tested on a phone, and no real CSI is flowing yet (the ESP32 has not
+  joined the hotspot), so the CANDIDATE states were shown with test inputs only.
+
+WORDING RULE: a candidate means "look here", never a confirmed person.
+"No candidate" is never evidence that nobody is there.

@@ -103,4 +103,4 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 1. Get real recordings and fill in the results table. Tune the thresholds from `evaluate.py`, not by eye.
 2. **Second ESP32 as node 2.** Two links seen from different angles cut false candidates from background motion, and the near zone becomes where the two links agree. The fusion logic is in place (`fusion.py`, tested on synthetic reports only); it needs the second node provisioned with `--node-id 2`.
 3. Optional trained 0/1/2 occupancy classifier, only reported once its measured accuracy is shown next to it.
-4. Show the status in the WaveSense phone UI (its Wi-Fi tile), with the same CANDIDATE wording.
+4. Show the status in the WaveSense phone UI (its Wi-Fi tile), with the same CANDIDATE wording. A patch is ready for the app owner: `integrations/wavesense-wifi-tile.patch` (also in `/srv/team28/patches/`), with notes in `integrations/wavesense-wifi-tile.txt`. Not yet applied or tested on a phone.
