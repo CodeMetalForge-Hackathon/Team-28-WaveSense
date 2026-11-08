@@ -74,11 +74,13 @@ Recalibrate after moving the node, the Pi or large furniture, or when the crowd 
 
 ## Measuring it
 
-Only consenting people go in the near zone. Recordings stay on the Pi and are git-ignored. Record at least 3 minutes each:
+Only consenting people go in the near zone. Recordings stay on the Pi (`~/missions/csi/`) and are git-ignored. Record at least 3 minutes each. The running receiver records on request, so RuView forwarding never stops:
 
 ```bash
-python3 -m xray.receiver --iface wlan1 --forward 127.0.0.1:5006 --record ~/missions/csi --label empty-crowd-A
-# repeat with --label empty-crowd-B, one-seated-A, two-seated-A, two-seated-crowd-B ...
+curl -X POST '127.0.0.1:3100/record/start?label=empty-crowd-A'    # ... wait 3+ minutes ...
+curl -X POST 127.0.0.1:3100/record/stop
+# repeat with labels empty-crowd-B, one-seated-A, two-seated-A, two-seated-crowd-B ...
+cd ~/Team-28-wifi-xray/wifi-sensing
 python3 -m xray.evaluate --calibrate ~/missions/csi/empty-crowd-A-*.csirec --save /tmp/cal.json
 python3 -m xray.evaluate --cal /tmp/cal.json ~/missions/csi/empty-crowd-B-*.csirec ~/missions/csi/one-* ~/missions/csi/two-*
 ```

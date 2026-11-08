@@ -14,6 +14,8 @@
     GET  /                      small auto-refreshing page
     POST /calibrate/start       near zone EMPTY; background activity is fine
     POST /calibrate/finish      saves the calibration to --cal-dir
+    POST /record/start?label=X  start a labelled recording in --record-dir (consenting people only)
+    POST /record/stop           close it; RuView forwarding never stops
 - --record writes <label>-<time>.csirec: repeated [f64 t][u16 n][n bytes], raw
   datagrams with receive times, for offline evaluation (evaluate.py). Recordings
   stay on this Pi: they are git-ignored and must never be published.
@@ -24,6 +26,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -31,6 +34,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from xray.csi_packet import parse_frame  # noqa: E402
@@ -38,6 +42,7 @@ from xray.engine import Calibration, NearZoneEngine  # noqa: E402
 from xray.fusion import fuse  # noqa: E402
 
 REC = struct.Struct("<dH")
+LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
 
 def iface_network(iface: str) -> ipaddress.IPv4Interface:
@@ -94,6 +99,9 @@ class Recorder:
         self.f.write(REC.pack(t, len(data)) + data)
         self.count += 1
 
+    def close(self) -> None:
+        self.f.close()
+
 
 def read_recording(path: str):
     """Yield (t, datagram) from a .csirec file."""
@@ -110,10 +118,12 @@ def read_recording(path: str):
 
 class FrontDoor:
     def __init__(self, bind: str, port: int, allow: ipaddress.IPv4Network, forward: tuple | None,
-                 cal_dir: str, recorder: Recorder | None = None, iface: str = "", station_probe=None):
+                 cal_dir: str, recorder: Recorder | None = None, iface: str = "", station_probe=None,
+                 record_dir: str | None = None):
         if bind == "0.0.0.0":
             raise SystemExit("refusing to bind 0.0.0.0: give the hotspot interface")
         self.allow, self.forward, self.cal_dir, self.recorder = allow, forward, cal_dir, recorder
+        self.record_dir = record_dir
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((bind, port))
         self.fwd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if forward else None
@@ -148,8 +158,9 @@ class FrontDoor:
                 self.stats["forwarded"] += 1
             except OSError:
                 self.stats["forward_errors"] += 1
-        if self.recorder:
-            self.recorder.write(t, data)
+        with self.lock:
+            if self.recorder:
+                self.recorder.write(t, data)
         frame = parse_frame(data)
         if frame is None:
             self.stats["other"] += 1           # vitals/sync packets etc.: forwarded, not analysed
@@ -206,6 +217,27 @@ class FrontDoor:
                     out[node] = dict(ok=False, error=str(err))
         return dict(ok=all(v["ok"] for v in out.values()) if out else False, nodes=out)
 
+    # ---- recording control ---------------------------------------------------------
+    def record_start(self, label: str) -> dict:
+        if not self.record_dir:
+            return dict(ok=False, error="recording disabled: start the receiver with --record-dir")
+        if not LABEL.match(label or ""):
+            return dict(ok=False, error="label: letters, digits, '-' and '_' only, up to 48 characters")
+        with self.lock:
+            if self.recorder:
+                return dict(ok=False, error="already recording", path=self.recorder.path)
+            self.recorder = Recorder(self.record_dir, label)
+            return dict(ok=True, path=self.recorder.path,
+                        note="only consenting people in the near zone; the file stays on this Pi")
+
+    def record_stop(self) -> dict:
+        with self.lock:
+            rec, self.recorder = self.recorder, None
+        if rec is None:
+            return dict(ok=False, error="not recording")
+        rec.close()
+        return dict(ok=True, path=rec.path, datagrams=rec.count)
+
     def status(self) -> dict:
         now = time.time()
         age = None if self.last_frame_t is None else round(now - self.last_frame_t, 1)
@@ -213,7 +245,7 @@ class FrontDoor:
             link = dict(self.stats, stations=self.stations, last_frame_age_s=age,
                         hint=link_hint(self.stats, self.stations, age, self.iface or "the hotspot", self.port))
             return dict(t=now, link=link, zone=fuse(self.reports), nodes={str(k): v for k, v in self.reports.items()},
-                        recording=self.recorder.path if self.recorder else None,
+                        recording=dict(path=self.recorder.path, datagrams=self.recorder.count) if self.recorder else None,
                         disclaimer="Experimental Wi-Fi sensing. CANDIDATE indications for a human to verify; "
                                    "no location, no count, not validated for life-safety use.")
 
@@ -230,6 +262,7 @@ let h='';for(const [n,r] of Object.entries(s.nodes)){h+=`<p>Node ${n}: <span cla
 `profile ${r.profile_distance??'-'} / ${r.profile_threshold??'-'}</small></p>`}
 const z=s.zone,hint=s.link.hint?`<p class=warn>${s.link.hint}</p>`:'';
 o.innerHTML=hint+(h?`<p>Zone: <span class=c>${z.state}</span> <small>(${z.basis})</small><br>${z.label}</p>`+h:'<p>No CSI node seen yet.</p>')+
+(s.recording?`<p class=warn>RECORDING ${s.recording.path} (${s.recording.datagrams} datagrams)</p>`:'')+
 `<small>${s.disclaimer}<br>link: ${JSON.stringify(s.link)}</small>`}
 catch(e){o.textContent='receiver not reachable'}}tick();setInterval(tick,1000)</script>"""
 
@@ -256,10 +289,15 @@ def make_http(door: FrontDoor, port: int) -> ThreadingHTTPServer:
             self.reply(404, {"error": "not found"})
 
         def do_POST(self):
-            if self.path == "/calibrate/start":
+            url = urlparse(self.path)
+            if url.path == "/calibrate/start":
                 return self.reply(200, door.calibrate_start())
-            if self.path == "/calibrate/finish":
+            if url.path == "/calibrate/finish":
                 return self.reply(200, door.calibrate_finish())
+            if url.path == "/record/start":
+                return self.reply(200, door.record_start(parse_qs(url.query).get("label", [""])[0]))
+            if url.path == "/record/stop":
+                return self.reply(200, door.record_stop())
             self.reply(404, {"error": "not found"})
 
     return ThreadingHTTPServer(("127.0.0.1", port), H)
@@ -274,8 +312,10 @@ def main(argv=None):
     ap.add_argument("--forward", default="127.0.0.1:5006", help="RuView UDP on loopback; 'none' to disable")
     ap.add_argument("--http-port", type=int, default=3100)
     ap.add_argument("--cal-dir", default=os.path.expanduser("~/.config/wifi-xray"))
-    ap.add_argument("--record", help="folder for .csirec recordings (stays on this Pi)")
+    ap.add_argument("--record", help="record from startup into this folder (stays on this Pi)")
     ap.add_argument("--label", default="session")
+    ap.add_argument("--record-dir", default=os.path.expanduser("~/missions/csi"),
+                    help="folder for recordings started over HTTP (POST /record/start?label=...)")
     a = ap.parse_args(argv)
     if a.bind:
         bind, allow = a.bind, ipaddress.IPv4Network(a.allow or f"{a.bind}/32", strict=False)
@@ -292,7 +332,8 @@ def main(argv=None):
     rec = Recorder(os.path.expanduser(a.record), a.label) if a.record else None
     probe = None if a.bind else (lambda: count_stations(a.iface))
     door = FrontDoor(bind, a.port, allow, forward, os.path.expanduser(a.cal_dir), rec,
-                     iface="" if a.bind else a.iface, station_probe=probe)
+                     iface="" if a.bind else a.iface, station_probe=probe,
+                     record_dir=os.path.expanduser(a.record) if a.record else os.path.expanduser(a.record_dir))
     httpd = make_http(door, a.http_port)
     for target in (door.udp_loop, door.assess_loop, httpd.serve_forever):
         threading.Thread(target=target, daemon=True).start()

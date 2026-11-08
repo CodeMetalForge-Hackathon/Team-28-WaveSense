@@ -35,7 +35,7 @@ class Receiver(unittest.TestCase):
         time.sleep(0.6)                      # let udp_loop see the stop flag
         for sk in (self.door.sock, self.door.fwd, self.sink, self.tx):
             sk and sk.close()
-        self.rec.f.close()
+        self.rec.f.closed or self.rec.close()
 
     def send(self, data):
         self.tx.sendto(data, self.addr)
@@ -86,6 +86,35 @@ class Receiver(unittest.TestCase):
         st = self.door.status()
         self.assertIsNone(st["link"]["hint"])                     # frames are flowing
         self.assertLess(st["link"]["last_frame_age_s"], 2)
+
+    def test_http_recording_start_stop(self):
+        self.door.record_stop()                                   # the setUp recorder
+        self.door.record_dir = os.path.join(self.tmp, "http-rec")
+        httpd = make_http(self.door, 0)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        post = lambda path: json.load(urllib.request.urlopen(urllib.request.Request(base + path, method="POST")))
+        self.assertFalse(post("/record/start?label=../../etc")["ok"])         # label is validated
+        self.assertFalse(post("/record/stop")["ok"])                          # not recording
+        self.send(build_frame(np.ones((1, 8)), sequence=1))                   # before start: not recorded
+        time.sleep(0.1)
+        r = post("/record/start?label=two-seated-A")
+        self.assertTrue(r["ok"])
+        self.assertTrue(os.path.basename(r["path"]).startswith("two-seated-A-"))
+        self.assertFalse(post("/record/start?label=other")["ok"])             # one at a time
+        during = [build_frame(np.ones((1, 8)), sequence=i) for i in (2, 3)]
+        for d in during:
+            self.send(d)
+        time.sleep(0.2)
+        self.assertEqual(self.door.status()["recording"]["datagrams"], 2)
+        stop = post("/record/stop")
+        self.assertEqual((stop["ok"], stop["datagrams"]), (True, 2))
+        self.send(build_frame(np.ones((1, 8)), sequence=4))                   # after stop: not recorded
+        time.sleep(0.1)
+        self.assertEqual([d for _, d in read_recording(r["path"])], during)
+        self.assertIsNone(self.door.status()["recording"])
+        self.assertEqual(self.door.stats["forwarded"], 4)                     # forwarding never paused
+        httpd.shutdown()
 
     def test_refuses_wildcard_bind(self):
         with self.assertRaises(SystemExit):
