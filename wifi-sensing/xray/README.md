@@ -2,6 +2,12 @@
 
 **Status: experimental. Validated only on synthetic data so far. No real-world accuracy has been measured yet** (see [Measuring it](#measuring-it)).
 
+## Bottom line so far (2026-11-07, measured, one link)
+
+- With correct decoding, this link **cannot reliably tell a person sitting still from an empty zone**. Furniture moved into the link (inferred: the chair) and slow drift change the channel as much as or more than a seated person, and a one-time calibration cannot separate them. "Candidate" therefore means "the channel changed": a person, a moved object, or drift.
+- Motion through the link has not been tested yet. It is the most likely thing this setup can show honestly.
+- For still people (the first-responder case), use a dedicated sensor that measures breathing directly, such as mmWave radar. Single-link Wi-Fi CSI is not that sensor.
+
 ## What it is for, and what it is not
 
 A single ESP32-C5 link (node ↔ Raspberry Pi hotspot) sees how the radio channel between the two changes. People near that link change it in two measurable ways:
@@ -98,6 +104,7 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 | 2026-11-07 | synthetic model (`tests/synth_csi.py`) | 0% | >80% (first within 20 s) | **unit test only, not evidence** |
 | 2026-11-07 21:21 | venue, node 1. Live calibration 21:17:54–21:19:34 (99 windows), scored on a **separate** empty recording `empty-crowd-A` 21:21:25–21:24:41 (196 s, 7,406 datagrams) | **0.0%** of 164 judged windows (median profile 0.93 vs threshold 4.0; breathing SNR 13.2 vs 35.9) | not measured yet | **measured, one recording only.** Crowd level and node placement not recorded (unverified). Says nothing yet about detection |
 | 2026-11-07 21:27 | `one-seated-A` 21:27:14–21:30:31 (196 s): one consenting person seated **about 60 cm beside** the devices, with the ESP32 and the Panda adapter **side by side** on the Pi | n/a | **0.0%** of 164 judged windows (median profile 1.0 vs threshold 4.0) | **measured: not detected.** Inferred cause: the link is a few cm long, so the person was never in its path (see Placement). Offline, 10 s profiles were shifted (median 1.77 vs empty 1.01), but drift over the 6 min between recordings was not ruled out |
+| 2026-11-07 22:09–22:23 | same placement, 12-bit decoder. Recalibrated live 22:09:38–22:11:19 (100 windows), then alternating 1 min segments: empty-1, one-1, empty-2, (one-2 discarded: the person was unsure whether to sit), empty-3, one-3, empty-4, one-4 | the live engine read **candidate in every segment after the first sit-down**, empty or not | not separable | **measured: a still, seated person is NOT detectable with this setup.** Profile distance to the calibration: empty-1 0.5, **one-1 5.0**, empty-2 4.6, empty-3 5.2, one-3 6.0, empty-4 5.7, one-4 5.5. The step at the first sit-down never reverted (likely the chair or something moved and stayed: inferred). Drift-robust check: one-3 is 2.6 / 0.9 from its empty neighbours, which are 2.0 from each other. Short-term variability shows no seated/empty difference either |
 | 2026-11-07 21:50–22:07 | antenna fitted, ESP32 on a power bank across the seat, **12-bit decoder** (see below). Calibrated offline on `empty-ant-A` (21:50:57–21:54:13); `one-seated-ant-A` 21:59:21–22:02:37; `empty-ant-B` 22:04:20–22:07:36 | `empty-ant-B`: **candidate in nearly every window** (profile 8.5–13.8 vs threshold 4.0, live) | `one-seated-ant-A`: 98.8% of 164 windows (scored) | **measured, and the detection is NOT valid evidence:** the empty recording after the seated one was further from the calibration (10 s profile distance 35–40) than the seated one (15–29), and RSSI fell -39 → -42 → -44 dBm. Something changed and stayed changed (object moved, device nudged, or warm-up drift; not yet known). The 97% re-score of `one-seated-A` (old placement) has the same unresolved confound |
 
 ## The ESP32-C5 payload is 12-bit, not int8 (found 2026-11-07 21:57)
