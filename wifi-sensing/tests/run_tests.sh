@@ -103,7 +103,7 @@ EOF
   echo running >"$S/docker_state_ruview-live"
   echo '172.17.0.1 ' >"$S/docker_gateway"
   touch "$S/docker_image_present" "$S/http_up"
-  echo '{"status":"ok","source":"esp32","tick":5012,"clients":1,"processing":{"state":"ok"}}' >"$S/http_health"
+  echo '{"status":"ok","source":"esp32","tick":5012,"clients":1,"processing":{"state":"ok","last_update_age_ms":40,"udp":{"datagrams":81234,"dropped_by_allowlist":0,"last_datagram_age_ms":12}}}' >"$S/http_health"
   nodes_json 58300 >"$S/http_nodes_1"
   nodes_json 58462 >"$S/http_nodes_2"
   echo "$TOKEN" >"$S/valid_token"
@@ -366,6 +366,15 @@ it "stream: stale/wrong token gives the dashboard hint"
 token_file 600 "a-different-token-0123456789abcdef0123"
 run check_stream.sh
 expect_rc 3 && expect_out "token rejected (HTTP 401)" && expect_out "API Access" && expect_no_out "a-different-token" && pass
+
+it "stream: esp32 configured but zero datagrams is NOT VERIFIED and never claims a frame (2026-11-07 regression)"
+token_file 600
+echo '{"clients":0,"processing":{"last_update_age_ms":null,"state":"idle","udp":{"datagrams":0,"dropped_by_allowlist":0,"last_datagram_age_ms":null}},"source":"esp32","status":"ok","tick":0}' >"$S/http_health"
+printf '{"total":0,"nodes":[]}' >"$S/http_nodes_1"
+printf '{"total":0,"nodes":[]}' >"$S/http_nodes_2"
+run check_stream.sh
+expect_rc 1 && expect_out "source_state=waiting" && expect_out "received no CSI datagram" &&
+  expect_out "udp_datagrams=0" && expect_out "NOT VERIFIED" && expect_no_out "accepted a frame within" && pass
 
 it "stream: esp32 configured but offline is NOT VERIFIED"
 token_file 600

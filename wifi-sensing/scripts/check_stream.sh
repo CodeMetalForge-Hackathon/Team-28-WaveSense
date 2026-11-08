@@ -111,8 +111,11 @@ if ! health=$(json_tool health <<<"$API_BODY"); then
 fi
 info "$(tr '\n' ' ' <<<"$health")"
 SOURCE_STATE=$(sed -n 's/^source_state=//p' <<<"$health")
+UDP_DATAGRAMS=$(sed -n 's/^udp_datagrams=//p' <<<"$health")
 case $SOURCE_STATE in
-  live) ok "server source is esp32 and it accepted a frame within the last 5 s" ;;
+  live) ok "server source is esp32 and RuView received a CSI datagram within the last 5 s (udp_datagrams=${UDP_DATAGRAMS})" ;;
+  waiting) fail "server is set to esp32 but RuView has received no CSI datagram in the last 5 s (udp_datagrams=${UDP_DATAGRAMS:-?}). Is the node on the hotspot? See TROUBLESHOOTING.md" ;;
+  configured) warn "server is set to esp32 but this build reports no UDP counters; liveness rests on the node sequence check below" ;;
   offline) fail "server is set to esp32 but has accepted no ESP32 frame for over 5 s (esp32:offline)" ;;
   simulated) fail "server is producing SIMULATED data" ;;
   *) warn "server source is not esp32" ;;
@@ -178,7 +181,7 @@ fi
 
 # ------------------------------------------------------------- verdict ----
 section "Verdict"
-if ((compare_rc == 0)) && [[ $SOURCE_STATE == live ]]; then
+if ((compare_rc == 0)) && [[ $SOURCE_STATE == live || $SOURCE_STATE == configured ]]; then
   ok "VERIFIED: real ESP32 CSI frames are arriving and being parsed"
   verdict=0
 else

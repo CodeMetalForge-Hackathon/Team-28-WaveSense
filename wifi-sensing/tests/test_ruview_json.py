@@ -51,16 +51,51 @@ class FormatTests(unittest.TestCase):
 
 class HealthTests(unittest.TestCase):
     def test_source_states(self):
-        self.assertEqual(rj.classify_source("esp32"), "live")
+        # "esp32" only says what the server is configured for; it is not liveness.
+        self.assertEqual(rj.classify_source("esp32"), "configured")
         self.assertEqual(rj.classify_source("esp32:offline"), "offline")
         self.assertEqual(rj.classify_source("simulated"), "simulated")
         self.assertEqual(rj.classify_source("auto"), "other")
         self.assertEqual(rj.classify_source(None), "unknown")
 
+    @staticmethod
+    def health(datagrams, age):
+        return {"status": "ok", "source": "esp32", "tick": 5,
+                "processing": {"state": "ok", "udp": {"datagrams": datagrams, "dropped_by_allowlist": 0,
+                                                      "last_datagram_age_ms": age}}}
+
+    def test_live_needs_a_recent_datagram(self):
+        self.assertEqual(rj.source_state(self.health(81234, 12)), "live")
+        self.assertEqual(rj.source_state(self.health(81234, 5000)), "live")
+        self.assertEqual(rj.source_state(self.health(81234, 5001)), "waiting")
+
+    def test_regression_esp32_with_zero_datagrams_is_not_live(self):
+        # Observed on the real Pi, 2026-11-07: source=esp32, 0 datagrams, no nodes.
+        doc = {"clients": 0, "processing": {"last_update_age_ms": None, "state": "idle",
+               "udp": {"datagrams": 0, "dropped_by_allowlist": 0, "last_datagram_age_ms": None}},
+               "source": "esp32", "status": "ok", "tick": 0}
+        self.assertEqual(rj.source_state(doc), "waiting")
+        lines = rj.summarise_health(doc)
+        self.assertIn("source_state=waiting", lines)
+        self.assertIn("udp_datagrams=0", lines)
+        self.assertIn("udp_last_datagram_age_ms=null", lines)
+
+    def test_no_udp_counters_is_only_configured(self):
+        self.assertEqual(rj.source_state({"status": "ok", "source": "esp32"}), "configured")
+        self.assertEqual(rj.source_state({"source": "esp32", "processing": {"state": "ok"}}), "configured")
+
+    def test_odd_age_values_are_not_live(self):
+        for age in (True, "12", -1, None, [12]):
+            self.assertEqual(rj.source_state(self.health(5, age)), "waiting", age)
+
     def test_summary_uses_allowlist(self):
-        lines = rj.summarise_health({"status": "ok", "source": "esp32", "secret": "abc"})
+        doc = self.health(7, 30)
+        doc["secret"] = "abc"
+        doc["processing"]["udp"]["peer"] = "aa:bb:cc:dd:ee:ff"
+        lines = rj.summarise_health(doc)
         self.assertIn("source_state=live", lines)
         self.assertNotIn("abc", "\n".join(lines))
+        self.assertNotIn("aa:bb", "\n".join(lines))
 
     def test_rejects_non_object(self):
         with self.assertRaises(ValueError):

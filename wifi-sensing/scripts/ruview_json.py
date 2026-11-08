@@ -59,8 +59,20 @@ def load(stream) -> object:
         raise ValueError(f"response is not valid JSON ({exc.__class__.__name__})") from None
 
 
+# A datagram younger than this counts as "live".
+LIVE_MAX_AGE_MS = 5000
+
+# Numeric UDP counters from /health processing.udp that are safe to print.
+UDP_FIELDS = ("datagrams", "dropped_by_allowlist", "last_datagram_age_ms")
+
+
 def classify_source(source: object) -> str:
-    """Map /health `source` to live | offline | simulated | other | unknown."""
+    """Map /health `source` to configured | offline | simulated | other | unknown.
+
+    `source` only says what the server is set to read. "esp32" is NOT evidence
+    that frames arrive: on 2026-11-07 /health said source=esp32 while
+    processing.udp.datagrams was 0. Use source_state() for liveness.
+    """
     if not isinstance(source, str) or not source:
         return "unknown"
     s = source.lower()
@@ -69,19 +81,51 @@ def classify_source(source: object) -> str:
     if s.endswith(":offline"):
         return "offline"
     if s == "esp32":
-        return "live"
+        return "configured"
     return "other"
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def udp_counters(doc: dict) -> dict | None:
+    processing = doc.get("processing")
+    udp = processing.get("udp") if isinstance(processing, dict) else None
+    return udp if isinstance(udp, dict) else None
+
+
+def source_state(doc: dict) -> str:
+    """live | waiting | configured | offline | simulated | other | unknown.
+
+    live       esp32 source and RuView received a datagram < LIVE_MAX_AGE_MS ago
+    waiting    esp32 source, but no datagram yet or the last one is too old
+    configured esp32 source, but this server build reports no UDP counters
+    """
+    state = classify_source(doc.get("source"))
+    if state != "configured":
+        return state
+    udp = udp_counters(doc)
+    if udp is None:
+        return "configured"
+    age = _number(udp.get("last_datagram_age_ms"))
+    return "live" if age is not None and 0 <= age <= LIVE_MAX_AGE_MS else "waiting"
 
 
 def summarise_health(doc: object) -> list[str]:
     if not isinstance(doc, dict):
         raise ValueError("health response is not a JSON object")
-    source = doc.get("source")
-    return [
+    lines = [
         f"status={fmt(doc.get('status'))}",
-        f"source={fmt(source)}",
-        f"source_state={classify_source(source)}",
+        f"source={fmt(doc.get('source'))}",
+        f"source_state={source_state(doc)}",
     ]
+    udp = udp_counters(doc)
+    if udp is not None:
+        lines += [f"udp_{k}={fmt(udp.get(k)) if _number(udp.get(k)) is not None else 'null'}" for k in UDP_FIELDS]
+    return lines
 
 
 def nodes_of(doc: object) -> list[dict]:
