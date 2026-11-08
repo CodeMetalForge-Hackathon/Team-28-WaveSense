@@ -92,7 +92,8 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 | Date | Data | False candidates (empty, crowd) | Detection (1 still person) | Status |
 |---|---|---|---|---|
 | 2026-11-07 | synthetic model (`tests/synth_csi.py`) | 0% | >80% (first within 20 s) | **unit test only, not evidence** |
-| (pending) | real recordings at the venue | n/a | n/a | ESP32 streaming since 21:08; needs on-site calibration and labelled recordings |
+| 2026-11-07 21:21 | venue, node 1. Live calibration 21:17:54–21:19:34 (99 windows), scored on a **separate** empty recording `empty-crowd-A` 21:21:25–21:24:41 (196 s, 7,406 datagrams) | **0.0%** of 164 judged windows (median profile 0.93 vs threshold 4.0; breathing SNR 13.2 vs 35.9) | not measured yet | **measured, one recording only.** Crowd level and node placement not recorded (unverified). Says nothing yet about detection |
+| (pending) | `one-seated-A`, `two-seated-A`, `two-seated-crowd-B`, `empty-crowd-B` | n/a | n/a | need the two consenting teammates |
 
 ## Link facts (2026-11-07 21:14, node 1, measured)
 

@@ -79,7 +79,7 @@ def score(path: str, cal: Calibration, node: int | None = None) -> dict:
     judged = [r for r in reps if r["state"] in ("candidate_present", "no_candidate")]
     cand = [r for r in judged if r["state"] == "candidate_present"]
     first = next((r["t"] - t_first for r in judged if r["state"] == "candidate_present"), None)
-    med = lambda k: float(np.median([r[k] for r in judged])) if judged else None
+    med = lambda k: round(float(np.median([r[k] for r in judged])), 2) if judged else None
     return dict(file=os.path.basename(path), label=label_of(path), windows=len(reps), judged=len(judged),
                 poor_link=sum(r["state"] == "poor_link" for r in reps),
                 candidate_pct=round(100 * len(cand) / len(judged), 1) if judged else None,
