@@ -47,3 +47,15 @@
 @media(orientation:landscape) and (min-width:600px){.sensor-tray{width:180px}.sensor-name{bottom:10px}}
 
 .person-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}.feed-shell .evidence-cue{z-index:2}
+
+/* One tap swaps the two continuously running views. */
+.sensor-tray,.vision-toggle,.main-title,.back-camera{display:none!important}
+.mini-swap{position:absolute;top:48px;left:20px;width:144px;height:102px;z-index:5;border:0;padding:0;background:#111;border-radius:7px;overflow:hidden;box-shadow:0 2px 12px #0008;touch-action:manipulation}.mini-swap .feed-shell,.mini-swap .lidar-panel{width:100%;height:100%}.mini-swap .lidar-panel{pointer-events:none}.mini-icon,.mini-expand{position:absolute;bottom:4px;background:#111b;color:#eee;font-size:16px;padding:0 4px;pointer-events:none}.mini-icon{left:4px}.mini-expand{right:4px}.mini-swap .map-tools,.mini-swap .map-state,.mini-swap .map-note,.mini-swap .map-scale,.mini-swap .lidar-readings,.mini-swap .feed-recover,.mini-swap .evidence-cue,.mini-swap .person-overlay text{display:none}.mini-swap .live-feed{object-fit:contain}.demo-tag{top:10px;right:10px}.phone[data-view=lidar] .viewport .map-tools{top:10px;right:12px}.proximity-hud .range-reading.front{top:116px}
+@media(orientation:landscape) and (min-width:600px){.mini-swap{top:48px;left:20px;width:136px;height:96px}.proximity-hud .range-reading.front{top:10px}}
+/* Compact radar evidence opens without hiding either drive stick. */
+.radar-peek{position:absolute;bottom:150px;left:50%;transform:translateX(-50%);z-index:5;border:1px solid #5557;background:#111e;border-radius:20px;min-height:42px;padding:0 16px;font:13px monospace;color:#aaa}.radar-peek.candidate{color:#f0cf96;border-color:#b79760}.radar-peek.paused{color:#888}.radar-detail{position:absolute;z-index:8;left:50%;transform:translateX(-50%);bottom:200px;width:min(330px,calc(100% - 32px));background:#111f;border:1px solid #555;border-radius:10px;padding:14px;color:#ddd}.radar-detail-top{display:flex;align-items:center;gap:10px}.radar-detail-top b{font:26px monospace;flex:1}.radar-detail-top button{width:36px;height:36px;border:0;background:none;color:#ddd;font-size:26px}.radar-verdict,.radar-limits{font-size:11px;color:#bba57f;margin-top:4px}.radar-detail>svg{display:block;width:100%;height:110px}.radar-context{display:flex;justify-content:space-between;color:#ddd;font:15px monospace;padding:8px 0}.radar-detail .radar-history{height:26px}.radar-detail>small{font-size:9px;color:#888}.radar-limits{color:#aaa}.radar-open .radar-peek{color:#fff}
+@media(orientation:landscape) and (min-width:600px){.radar-peek{bottom:55px;min-height:36px;font-size:11px}.radar-detail{bottom:64px;width:310px;left:50%;padding:8px 12px}.radar-detail-top b{font-size:20px}.radar-detail>svg{height:80px}.radar-context{font-size:12px;padding:4px 0}.radar-verdict,.radar-limits{font-size:10px}.radar-detail .radar-history{height:18px}.radar-detail>small{font-size:8px}}
+
+.mini-icon,.mini-expand{z-index:2}
+
+.viewport > .feed-shell[data-sensor=camera] .live-feed{object-fit:cover;object-position:center}

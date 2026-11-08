@@ -48,3 +48,8 @@ class SensorModeTests(unittest.TestCase):
   self.m.select('both');self.m.stop_unconfirmed=True
   with self.assertRaises(RuntimeError):self.m.close()
   self.assertNotIn('lidar',self.active)
+
+ def test_dead_worker_recovers_without_stopping_lidar(self):
+  self.m.select('both');old=self.m.process;old.alive=False;self.active.discard('radar')
+  self.m.recover_radar();self.assertIsNot(self.m.process,old);self.assertEqual(self.active,{'radar','lidar'})
+  self.m.close();self.m.recover_radar();self.assertFalse(self.active)

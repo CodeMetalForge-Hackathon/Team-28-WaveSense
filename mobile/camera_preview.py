@@ -167,7 +167,9 @@ class Gateway:
     def radar_poll(self):
         from radar_status import read_radar
         while True:
+            self.sensor_modes.recover_radar()
             self.radar = read_radar(self.args.radar_status_file) if self.sensor_modes.enabled["radar"] else {"online":False,"tracks":[],"reason":"Radar off"}
+            if self.radar.get('online'):self.sensor_modes.restart_failures=0
             time.sleep(.3)
 
     def start_lidar(self):

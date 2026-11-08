@@ -1,6 +1,7 @@
 """Independent capture selections, serialized across phones. Never drives wheels."""
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 RADAR_DIR = Path('/home/adritforge/Team-28-wifi-xray/wifi-sensing/radar')
@@ -17,6 +18,9 @@ class SensorModes:
         self.process = None
         self.error = None
         self.stop_unconfirmed = False
+        self.closed = False
+        self.restart_due = 0
+        self.restart_failures = 0
 
     @property
     def mode(self):
@@ -27,7 +31,7 @@ class SensorModes:
         process = self.process
         dead = self.enabled['radar'] and process is not None and process.poll() is not None
         return {'mode':self.mode,'enabled':dict(self.enabled),'switching':self.switching,
-                'error':'Radar stopped; toggle off and retry' if dead else self.error}
+                'error':'Radar reconnecting' if dead else self.error}
 
     def stop_radar(self):
         if self.stop_unconfirmed: raise RuntimeError('Radar stop unconfirmed; power-cycle radar before restarting server')
@@ -41,15 +45,31 @@ class SensorModes:
                     raise RuntimeError('Radar stop timed out')
             self.process = None
 
+    def launch_radar(self):
+        self.clear_export()
+        with (self.root/'radar-worker.log').open('ab') as log:
+            self.process=self.popen([RADAR_PYTHON,'-I','radar_service.py','--near-range-m','5.0'],
+                                    cwd=RADAR_DIR,stdout=log,stderr=subprocess.STDOUT)
+
+    def recover_radar(self):
+        if self.closed or not self.enabled['radar'] or not self.lock.acquire(blocking=False):return
+        try:
+            if self.closed or not self.enabled['radar']:return
+            if self.process is not None and self.process.poll() is None:return
+            now=time.monotonic()
+            if now<self.restart_due:return
+            self.restart_due=now+(3,10,30,60)[min(self.restart_failures,3)]
+            self.restart_failures+=1
+            try:self.launch_radar();self.error=None
+            except Exception as error:self.error=type(error).__name__
+        finally:self.lock.release()
+
     def _set(self, sensor, enabled):
         if self.enabled[sensor] == enabled: return
         if sensor == 'radar':
             if enabled:
                 if self.stop_unconfirmed: raise RuntimeError('Radar requires power-cycle')
-                self.clear_export()
-                with (self.root/'radar-worker.log').open('ab') as log:
-                    self.process = self.popen([RADAR_PYTHON,'-I','radar_service.py'],cwd=RADAR_DIR,
-                                               stdout=log,stderr=subprocess.STDOUT)
+                self.launch_radar()
             else: self.stop_radar()
         elif enabled: self.start_lidar()
         else: self.stop_lidar()
@@ -78,6 +98,7 @@ class SensorModes:
             finally: self.switching=False
 
     def close(self):
+        self.closed = True
         # A radar shutdown error must not prevent LiDAR cleanup.
         with self.lock:
             try: self.stop_radar()

@@ -27,7 +27,12 @@ def read_radar(path, now=None):
             r=float(t['range_m']);a=t.get('bearing_deg');a=float(a) if a is not None else None
             if not math.isfinite(r) or not 0<=r<=100 or (a is not None and(not math.isfinite(a)or abs(a)>180)):continue
             tracks.append({'range_m':r,'bearing_deg':a,'candidate':True})
-        return {'online':True,'usb_detected':detected,'source':'radar','age_ms':round(age*1000),
+        from scene_contract import clean_scene
+        scene = clean_scene(s.get('scene'),now)
+        assessment=s.get('assessment') if isinstance(s.get('assessment'),dict) else {}
+        signal=assessment.get('signal') if assessment.get('signal') in ('motion','micro_motion') else None
+        watch=s.get('watch_range_m');watch=watch if type(watch) in (float,int) and math.isfinite(watch) and 0<watch<=100 else None
+        return {'scene':scene,'signal':signal,'watch_range_m':watch,'online':True,'usb_detected':detected,'source':'radar','age_ms':round(age*1000),
                 'state':s.get('state') if s.get('state') in ('candidate','motion','clear','not_judging') else 'not_judging',
                 'tracks':tracks,'spatial_alignment_verified':False,'through_wall_validated':False}
     except (OSError,ValueError,KeyError,TypeError):return offline

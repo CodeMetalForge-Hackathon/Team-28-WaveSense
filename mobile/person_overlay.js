@@ -20,6 +20,7 @@ globalThis.PersonOverlay=(()=>{
    const p=enabled&&packet?plan(packet.vision,packet.camera,performance.now()-received):null;
    if(!p||!p.boxes.length){svg?.remove();return}
    if(!svg){svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('person-overlay');svg.setAttribute('aria-label','Recent camera person detections; positions may briefly lag video');svg.setAttribute('preserveAspectRatio','xMidYMid meet');shell.append(svg)}
+   svg.setAttribute('preserveAspectRatio',shell.closest('.mini-swap')?'xMidYMid meet':'xMidYMid slice');
    svg.setAttribute('viewBox',`0 0 ${p.width} ${p.height}`);
    svg.innerHTML=p.boxes.map(([x1,y1,x2,y2])=>{const k=Math.min(24,(x2-x1)/4,(y2-y1)/4);const path=[[x1,y1,1,1],[x2,y1,-1,1],[x1,y2,1,-1],[x2,y2,-1,-1]].map(([x,y,sx,sy])=>`M${x+sx*k} ${y}H${x}V${y+sy*k}`).join('');return `<path d="${path}" fill="none" stroke="white" stroke-width="2" vector-effect="non-scaling-stroke"/><text x="${x1+3}" y="${Math.max(13,y1-5)}" fill="white" stroke="#111" stroke-width="3" paint-order="stroke" font-family="sans-serif" font-size="13">CAM person</text>`}).join('');
   });

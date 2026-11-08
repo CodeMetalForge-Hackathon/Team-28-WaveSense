@@ -1,14 +1,9 @@
-WAVESENSE PHONE CONTROLS
+WAVESENSE — START AT HANDOFF.md
 
-Phone: http://100.99.36.78:8080/ (Tailscale connected, refresh after updates).
-Driving is enabled. Left stick moves; right stick turns. Release to stop.
+Phone: http://100.99.36.78:8080/ (Tailscale; refresh).
+Top-left mini view swaps camera and LiDAR. Camera boxes are always on.
+Radar chip opens evidence. Both sensors start automatically; driving is enabled.
+Radar currently enumerates but times out on its initial USB command after reboot.
+See HANDOFF.md for the physical replug needed, source branches and unvalidated angle/person detection work.
 
-Camera, LiDAR and Radar start automatically and stay on together.
-Tap a preview to change the main view; Camera returns to the live image.
-Live is the faster original video. Boxes adds recent person detections over the same full-rate video.
-The attached camera only supports 640x480; measured Live ~22.7 fps (30 fps mode).
-
-Pi: cd /srv/team28/wavesense-mobile && ./start.sh
-For stationary checks: ./start-stationary.sh (sensors on, driving disabled).
-Do not run separate sensor test programs while this server owns the devices.
-See README.md for power tests, camera capabilities and range-only radar limits.
+Start: cd /srv/team28/wavesense-mobile && ./start.sh

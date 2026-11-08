@@ -1,5 +1,7 @@
 # WaveSense phone sensor console
 
+**Latest interface and radar status: [HANDOFF.md](HANDOFF.md).** This supersedes earlier UI/capture notes below.
+
 Phone: **http://100.99.36.78:8080/** while connected to the robot's Tailscale network.
 Refresh after updates. The current deployment enables driving through the sticks; wheels open only on fresh operator input. Release either stick to neutral; the control watchdog remains active.
 

@@ -31,6 +31,9 @@ class RecoveryTests(unittest.TestCase):
                 self.done = len(self.delays) >= 4
                 return self.done
         class Device:
+            wavelength = .012426
+            bandwidth = 250e6
+            def range_axis(self,n): return [i*.3 for i in range(n//2+1)]
             def __init__(self): self.starts = 0
             def frames(self, stop): raise OSError('USB lost on first frame')
             def start(self): self.starts += 1
@@ -80,3 +83,15 @@ class RecoveryTests(unittest.TestCase):
              patch('signal.signal'):
             service.main(['--contract-file','none'])
         self.assertFalse(state['raced'])
+
+    def test_cold_start_retries_close_failed_device_before_retry(self):
+        service=self.load_service();events=[];delays=[]
+        class Device:
+            calls=0
+            def start(self):
+                self.calls+=1;events.append('start')
+                if self.calls<3:raise OSError('cold USB queue')
+                return self
+            def close(self):events.append('close')
+        device=Device();self.assertIs(service.start_device(device,wait=delays.append),device)
+        self.assertEqual(delays,[3,10]);self.assertEqual(events,['start','close','start','close','start'])
