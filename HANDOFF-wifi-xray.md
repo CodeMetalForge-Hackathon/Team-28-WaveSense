@@ -50,17 +50,12 @@ docker start ruview-live
 cd ~/Team-28-wifi-xray/wifi-sensing && nohup python3 -m xray.receiver --iface wlan1 --forward 127.0.0.1:5006 > ~/missions/xray-receiver.log 2>&1 &
 ```
 
-## BLOCKER: the ESP32 can't see the hotspot (updated 2026-11-07 20:30)
+## RESOLVED 21:13: the ESP32 streams CSI
 
-Run `python3 wifi-sensing/scripts/esp32_log.py` to see the node's state. It reads without resetting, masks MACs and secrets, and explains the reason code. `status.json` `link.hint` says the same in one line.
-
-- **Measured:** `reason=201` (NO_AP_FOUND) on every 30 s retry since the 20:00 boot (attempt 56 at 20:30). The hotspot has 0 associated stations (`iw dev wlan1 station dump`).
-- **Measured:** while unassociated, the node captures on fallback channel 1, and every logged frame is at **-92 to -94 dBm**. The Pi's `wlan0` lists the venue's channel-1 AP at 85% (NetworkManager, app output). **Inferred:** antenna, placement or shielding problem on the node. Not verified.
-- **The 3 dBm theory is probably wrong.** `iw` still says `txpower 3.00 dBm` after the user ran `sudo iw dev wlan1 set txpower fixed 2000` (20:19). On mt7921 drivers 3.00 dBm is a known reporting bug: it is what the driver prints when it has no power figure, and `set txpower fixed` can succeed without changing it. So the real power is unknown. Don't push the dispatcher-script fix unless new evidence points back at power.
-- **20:40, the user's phone next to the Pi does NOT see `ForgeCSI`.** So the hotspot is silent on air, although NetworkManager says "Activation: successful" and wpa_supplicant logged `wlan1: AP-ENABLED` (19:57:10). `iw dev wlan1 survey dump` marks no channel "in use", and every airtime counter stays at 0 ms (measured; reading that as "radio not running" is inferred). The same adapter streamed CSI at 30.9 Hz earlier today (`docs/wifi-csi/RESULTS.md`), so this is a stuck state, not a design problem.
-- **Proposed fixes, all need the user (root), least invasive first:** (1) `sudo nmcli connection down ForgeCSI && sudo nmcli connection up ForgeCSI`. wlan0/SSH is unaffected. (2) Re-plug the Panda adapter, preferably into a USB 2.0 port; it is on USB 3 (5000M) now, and USB 3 radiates 2.4 GHz noise. NetworkManager re-activates ForgeCSI by itself (autoconnect=yes). (3) `sudo modprobe -r mt7921u && sudo modprobe mt7921u`. **21:02: the user ran fix (3), the driver reload. It did NOT help:** the ESP32 (rebooted by the 20:54 power cut) still logs reason=201 at 21:04, with 0 stations. No kernel, firmware or NetworkManager package changed today (`/var/log/apt/history.log`), and dmesg shows no mt7921u errors. Next: fix (2), checking that the adapter's antennas are screwed on. After each: phone check, then `iw dev wlan1 station dump` (the ESP32 retries every 30 s), then `status.json` `link.csi_frames`.
-- `/dev/ttyUSB0` (CP2102N) is the robot's **RPLIDAR C1**, not the second ESP32. Leave it alone.
-- You cannot `sudo` on your own initiative (`sudo -n` may succeed while the user's timestamp is cached; don't use it without their OK). `nmcli up` / `wifi rescan` are "not authorized".
+- **Cause of the silent hotspot (fixed 21:08):** the Panda adapter on a USB 3 port. The user moved it to a **USB 2.0 port**; the AP came on air at 21:08:18 and the ESP32 joined at 21:08:19. A driver reload (21:02) had not helped. Keep it on USB 2.0. The `txpower 3.00 dBm` reading is an mt7921 reporting bug, not a cause.
+- **BOOT button = download mode.** The user pressed BOOT on the ESP32 at about 21:08:36, and it sat silent in the ROM loader. `esptool --before no-reset --after hard-reset chip-id` did NOT reset it ("Stub flasher is already running" afterwards). **`esptool --port /dev/ttyACM0 --before no-reset --after watchdog-reset chip-id` did** (21:13). chip-id is on the allowed list.
+- **Measured link facts** (21:14, in the README "Link facts" table): 27.9 CSI frames/s, 52 subcarriers, RSSI -69 to -71 dBm, all datagrams forwarded to RuView; RuView `check_stream.sh` says VERIFIED.
+- `/dev/ttyUSB0` (CP2102N) is the robot's RPLIDAR C1, not the second ESP32. Never open it.
 
 ## Other open problems
 
@@ -72,7 +67,7 @@ Run `python3 wifi-sensing/scripts/esp32_log.py` to see the node's state. It read
 
 ## Next steps, in order
 
-1. Once the ESP32 streams (`status.json` `link.csi_frames` rising, RuView `udp_datagrams` rising), record the packet rate, RSSI and subcarrier count as **measured** facts.
+1. ~~Record the packet rate, RSSI and subcarrier count as measured facts.~~ Done 21:14 (README "Link facts").
 2. **Calibrate on site** with the near zone empty and the crowd present: `curl -X POST 127.0.0.1:3100/calibrate/start`, wait at least 90 s, then `/calibrate/finish`.
 3. **Record labelled sessions with the two consenting teammates**, at least 3 min each: `empty-crowd-A`, `empty-crowd-B`, `one-seated-A`, `two-seated-A`, `two-seated-crowd-B`. Use `curl -X POST '127.0.0.1:3100/record/start?label=NAME'` and `/record/stop` on the running receiver (no restart needed; files go to `~/missions/csi/`). Recordings stay on the Pi and are never committed.
 4. `python3 -m xray.evaluate --calibrate <empty-A> --save /tmp/cal.json` then `--cal /tmp/cal.json <the others>`. Tune the thresholds in `engine.py` (class constants) from that data only. Fill the README results table, labelling every number measured / app output / inferred.

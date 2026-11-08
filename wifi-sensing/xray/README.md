@@ -92,13 +92,26 @@ Report the summary line, false-candidate % (empty) and detection % (one / two), 
 | Date | Data | False candidates (empty, crowd) | Detection (1 still person) | Status |
 |---|---|---|---|---|
 | 2026-11-07 | synthetic model (`tests/synth_csi.py`) | 0% | >80% (first within 20 s) | **unit test only, not evidence** |
-| (pending) | real recordings at the venue | n/a | n/a | needs the ESP32 streaming (see below) |
+| (pending) | real recordings at the venue | n/a | n/a | ESP32 streaming since 21:08; needs on-site calibration and labelled recordings |
+
+## Link facts (2026-11-07 21:14, node 1, measured)
+
+| Fact | Value | Label |
+|---|---|---|
+| CSI frames delivered to the front door | **27.9 /s** over 60 s (1,676 frames); other node datagrams 4.7 /s | measured |
+| Forwarded to RuView | 1,961 of 1,961 datagrams, 0 errors, 0 dropped by the allowlist. RuView `/health`: `source_state=live`, `udp_datagrams` rising | measured |
+| Subcarriers per frame | **52** (1 antenna) | measured |
+| RSSI in the CSI frames | **-69 to -71 dBm** (engine mean over its buffer) | measured |
+| Hotspot's view of the node | signal -61 dBm, tx MCS 3, rx MCS 2, 0 tx failures | measured (`iw station dump`) |
+| Firmware sequence rate | 36 /s (RuView `check_stream.sh`); the firmware numbers every capture but sends at most one frame per 20 ms, so this exceeds the delivered rate | app output |
+| Node position relative to the hotspot | not recorded yet | unverified |
 
 ## Known issues (2026-11-07)
 
-- **Node 1 has never joined the hotspot since the 20:00 boot.** Measured from its console (`esp32_log.py`, 20:30): `reason=201` NO_AP_FOUND on every retry (attempt 56), and the hotspot shows 0 associated stations. While unassociated, the node captures CSI on its fallback channel 1, and every logged frame there is at **-92 to -94 dBm** (measured). The Pi's own `wlan0` lists the venue's channel-1 AP at 85% signal (app output, NetworkManager). That gap points to the node's antenna, placement or shielding (**inferred, not verified**). **Update 20:40:** a phone next to the Pi does not see `ForgeCSI` either (user check), so the hotspot itself is silent although NetworkManager and wpa_supplicant report it enabled. Restart the hotspot or re-plug the adapter (see the handoff).
-- `iw dev wlan1 info` reports **`txpower 3.00 dBm`**, even after `sudo iw dev wlan1 set txpower fixed 2000` (20:19). On mt7921 drivers this figure is a known reporting bug: it is what the driver prints when it has no power value, and `set txpower fixed` can succeed without changing it. So the real transmit power is **unknown**, and probably normal. It is no longer the main suspect.
-- The Pi lost power repeatedly (power-on resets, `rsts=0x1000`) with a 5 A wall supply and no prior voltage sag. The supply or its connection is suspect.
+- **Fixed at 21:08: the hotspot was silent on air.** NetworkManager and wpa_supplicant reported ForgeCSI enabled, but neither a phone next to the Pi nor the ESP32 could see it (reason=201 on every retry). A driver reload did not help. Re-plugging the Panda adapter from a USB 3 port (5000M) into a **USB 2.0 port** (480M) did: the AP came on air at 21:08:18 and the ESP32 joined one second later (measured). Whether the port or the re-plug was the cure is not known. USB 3 radiating noise at 2.4 GHz is a documented effect (inferred). **Keep the adapter on USB 2.0.**
+- `iw dev wlan1 info` reports `txpower 3.00 dBm` whatever is set. On mt7921 this is a known reporting bug, and the figure is not the real power.
+- **Pressing BOOT on the ESP32-C5 board leaves it in download mode** (silent console, no Wi-Fi). esptool's RTS hard reset did not get it out over USB-Serial/JTAG; `esptool --before no-reset --after watchdog-reset chip-id` did (measured, 21:13). To restart the node by hand, press **RST**, not BOOT.
+- The Pi lost power repeatedly (7 times since 18:00, last at about 20:54) with a 5 A wall supply and no prior voltage sag. The supply or its connection is suspect.
 
 ## Next steps
 
