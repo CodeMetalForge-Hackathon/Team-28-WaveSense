@@ -21,6 +21,8 @@ A candidate is for a human to verify. **No candidate is NOT evidence that nobody
 | `radar_service.py` | acquisition thread, engine, `.radrec` recorder, HTTP on 127.0.0.1:3101 (status, calibrate, record) |
 | `radar_eval.py` | replay a `.radrec` and **measure** it by clock-time segments |
 
+**Phone app (WaveSense):** the service also writes the app's radar contract (schema 1) every second to `/srv/team28/runtime/radar/status.json`, replaced atomically: `candidate` (still), `motion` (moving), `clear`, or `not_judging` (calibrating, uncalibrated, warming up), with one track at the strongest range and `bearing_deg: null` (no angle yet). The app reads it when started with `--radar-status-file /srv/team28/runtime/radar/status.json`. Its default path is inside the shared Team-28 checkout, which is not git-ignored and holds uncommitted work, so the file deliberately goes outside it. `--contract-file none` turns it off.
+
 The Wi-Fi receiver (port 3100) polls the radar status. Its `zone` combines both: a radar candidate is a CANDIDATE (with range); Wi-Fi movement alone is a WEAK candidate; neither means no candidate.
 
 ## Setup (once)

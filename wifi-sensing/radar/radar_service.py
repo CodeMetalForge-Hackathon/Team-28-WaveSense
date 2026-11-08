@@ -10,6 +10,10 @@
 Recordings (~/missions/radar/*.radrec, repeated [f64 t][u16 n][u16 rx][n*rx int16]) stay on
 this Pi and are never committed. Only consenting people go in front of the radar.
 The wifi-xray receiver (port 3100) includes this status in its own when it is running.
+
+It also writes the WaveSense phone app's radar contract (schema 1) once a second, replacing the
+file atomically (default /srv/team28/runtime/radar/status.json; point the app at it with
+`--radar-status-file`). Range only: bearing_deg stays null until angle is measured.
 """
 from __future__ import annotations
 
@@ -29,6 +33,33 @@ sys.path.insert(0, HERE)
 from radar_engine import RadarCalibration, RadarEngine  # noqa: E402
 
 REC = struct.Struct("<dHH")
+CONTRACT_DEFAULT = "/srv/team28/runtime/radar/status.json"
+
+
+def contract_payload(report: dict, now: float, online: bool = True) -> dict:
+    """WaveSense radar contract, schema 1 (wavesense-mobile/README.md, 'Radar teammate contract').
+    candidate_present -> 'motion' if moving else 'candidate'; no_candidate -> 'clear'; anything else
+    (calibrating, uncalibrated, warming up, no data) -> 'not_judging'. One track per candidate, at the
+    strongest range; bearing_deg is None because no angle is measured."""
+    st = report.get("state")
+    if st == "candidate_present":
+        state = "motion" if report.get("kind") == "moving" else "candidate"
+        tracks = [{"range_m": float(report["range_m"]), "bearing_deg": None}] if report.get("range_m") is not None else []
+    elif st == "no_candidate":
+        state, tracks = "clear", []
+    else:
+        state, tracks = "not_judging", []
+    return {"schema": 1, "timestamp_ms": int(now * 1000), "online": bool(online and st != "no_data"),
+            "state": state, "tracks": tracks}
+
+
+def write_atomic(path: str, payload: dict) -> None:
+    d = os.path.dirname(path)
+    tmp = os.path.join(d, f".{os.path.basename(path)}.{os.getpid()}.tmp")
+    with open(tmp, "w") as f:
+        json.dump(payload, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
 LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 
 
@@ -47,7 +78,7 @@ def read_radrec(path: str):
 
 
 class RadarService:
-    def __init__(self, device, cal_path: str, record_dir: str, near_range_m: float):
+    def __init__(self, device, cal_path: str, record_dir: str, near_range_m: float, contract_file: str | None = None):
         self.dev, self.cal_path, self.record_dir = device, cal_path, record_dir
         cal = RadarCalibration.load(cal_path) if os.path.exists(cal_path) else None
         self.eng = RadarEngine(device.range_axis(RadarEngine.NFFT), cal, near_range_m)
@@ -56,6 +87,7 @@ class RadarService:
         self.rec = None
         self.rec_path, self.rec_count = None, 0
         self.error = None
+        self.contract_file, self.contract_error = contract_file, None
 
     def acquire(self) -> None:
         try:
@@ -75,6 +107,12 @@ class RadarService:
             if self.error:
                 r = dict(state="no_data", valid=False, detail=f"radar stopped: {self.error}", t=time.time())
             self.report = r
+            if self.contract_file:
+                try:
+                    write_atomic(self.contract_file, contract_payload(r, time.time(), online=not self.error))
+                    self.contract_error = None
+                except OSError as e:
+                    self.contract_error = f"{type(e).__name__}: {e}"
 
     def calibrate_start(self) -> dict:
         with self.lock:
@@ -114,6 +152,7 @@ class RadarService:
     def status(self) -> dict:
         return dict(t=time.time(), radar=self.report, frames_in=self.eng.frames_in,
                     recording=dict(path=self.rec_path, frames=self.rec_count) if self.rec else None,
+                    contract=dict(file=self.contract_file, error=self.contract_error),
                     disclaimer="Experimental 24 GHz radar sensing. CANDIDATE indications for a human to verify; "
                                "range only, no count, not validated for life-safety use.")
 
@@ -156,11 +195,16 @@ def main(argv=None):
     ap.add_argument("--cal", default=os.path.expanduser("~/.config/wifi-xray/radar1.json"))
     ap.add_argument("--record-dir", default=os.path.expanduser("~/missions/radar"))
     ap.add_argument("--near-range-m", type=float, default=2.0, help="candidates within this range count as near")
+    ap.add_argument("--contract-file", default=CONTRACT_DEFAULT,
+                    help="WaveSense radar contract JSON, replaced atomically each second; 'none' to disable")
     a = ap.parse_args(argv)
     from tinyrad_dev import TinyRadDevice
     os.makedirs(os.path.dirname(a.cal), mode=0o700, exist_ok=True)
     dev = TinyRadDevice().start()
-    svc = RadarService(dev, a.cal, a.record_dir, a.near_range_m)
+    contract = None if a.contract_file == "none" else a.contract_file
+    if contract:
+        os.makedirs(os.path.dirname(contract), mode=0o2775, exist_ok=True)
+    svc = RadarService(dev, a.cal, a.record_dir, a.near_range_m, contract)
     httpd = make_http(svc, a.http_port)
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))   # stop cleanly

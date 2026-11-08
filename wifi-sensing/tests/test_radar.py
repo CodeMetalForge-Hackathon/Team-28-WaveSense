@@ -82,6 +82,39 @@ class RadarSynthetic(unittest.TestCase):
         self.assertEqual(reps[-1]["state"], "no_candidate")
 
 
+class Contract(unittest.TestCase):
+    """The WaveSense phone app's radar file (schema 1)."""
+
+    def payload(self, **report):
+        from radar_service import contract_payload
+        return contract_payload(report, 1794120000.5)
+
+    def test_state_mapping(self):
+        p = self.payload(state="candidate_present", kind="still, micro-motion", range_m=1.5)
+        self.assertEqual((p["schema"], p["timestamp_ms"], p["online"], p["state"]), (1, 1794120000500, True, "candidate"))
+        self.assertEqual(p["tracks"], [{"range_m": 1.5, "bearing_deg": None}])         # no angle: null
+        self.assertEqual(self.payload(state="candidate_present", kind="moving", range_m=0.9)["state"], "motion")
+        self.assertEqual(self.payload(state="no_candidate", range_m=1.8), {"schema": 1, "timestamp_ms": 1794120000500,
+                                                                          "online": True, "state": "clear", "tracks": []})
+        for st in ("calibrating", "uncalibrated", "poor_link"):
+            self.assertEqual(self.payload(state=st)["state"], "not_judging")
+        self.assertFalse(self.payload(state="no_data")["online"])
+
+    def test_atomic_write_is_read_by_the_wavesense_app(self):
+        import tempfile, time as _t
+        from radar_service import contract_payload, write_atomic
+        d = tempfile.mkdtemp(); path = os.path.join(d, "status.json")
+        write_atomic(path, contract_payload(dict(state="candidate_present", kind="still", range_m=1.2), _t.time()))
+        self.assertEqual(os.listdir(d), ["status.json"])                                 # no temp file left behind
+        app = "/srv/team28/wavesense-mobile"
+        if not os.path.exists(os.path.join(app, "radar_status.py")):
+            self.skipTest("WaveSense app not on this machine")
+        sys.path.insert(0, app)
+        from radar_status import read_radar                                              # the app's own reader
+        r = read_radar(path)
+        self.assertEqual((r["online"], r["state"], r["tracks"]), (True, "candidate", [{"range_m": 1.2, "bearing_deg": None, "candidate": True}]))
+
+
 class Combine(unittest.TestCase):
     W = lambda self, s: dict(state=s, basis="", label="")
 

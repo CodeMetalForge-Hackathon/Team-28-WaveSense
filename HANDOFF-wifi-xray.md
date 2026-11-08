@@ -64,6 +64,7 @@ cd ~/Team-28-wifi-xray/wifi-sensing && nohup python3 -m xray.receiver --iface wl
 - **Stop it only with `kill -TERM <exact pid>`.** Never use `pkill -f radar_service.py`: the pattern matches your own shell, and a killed stream left the radar answering nothing until a physical replug.
 - Results: seated still person 95% of seconds; through a wooden door 95/95 s at ~1.5 m; people moving within ~2 m trigger it; the breathing-rate estimate is unreliable (always ~9/min). Results page: `wifi-sensing/radar/results-2026-11-07.html`.
 - The user decided (23:37) to make the radar the product and keep Wi-Fi as a measured comparison.
+- **2026-11-08 02:53, final system: radar + camera + the RPLIDAR C1** (the Livox MID-360S on Ethernet is not used; eth0 never had a link). The teammate's WaveSense app (`/srv/team28/wavesense-mobile`, runs as user `teammate`) now defaults to `--lidar-mode 3d` (Livox) and shows the lidar offline. It must be restarted by the teammate with `./start-stationary.sh --lidar-mode 2d --radar-status-file /srv/team28/runtime/radar/status.json`. The radar service writes that file (the app's schema-1 contract, checked with the app's own `read_radar`).
 - **Run tests on the user's command words** ("calibrate", "sit", "empty", "done"), never on a schedule they did not confirm.
 
 ## Other open problems
