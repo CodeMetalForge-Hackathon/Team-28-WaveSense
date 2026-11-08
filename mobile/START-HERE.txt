@@ -1,0 +1,20 @@
+WAVESENSE: STATIONARY LIVOX 3D CHECK
+
+Phone: http://100.99.36.78:8080/ (connect Tailscale first).
+Refresh the page after updates. Tap LiDAR for 3D / Top / Front / Fit / height colour.
+
+Pi: cd /srv/team28/wavesense-mobile && ./start-stationary.sh
+This launcher rejects driving. The old start.sh has driving enabled; do not use it
+for the current stationary sensor checks.
+
+Livox IP: 192.168.1.3. Pi wired interface: 192.168.1.50/24, no default route.
+Network profile: ./livox/setup-network.sh. Native receiver build: ./livox/build.sh.
+Default model MID-360S, based on supplied box. Original MID-360 override:
+./start-stationary.sh --lidar-model mid360
+
+A missing Ethernet carrier cannot be fixed by the app: check LiDAR DC supply,
+USB-C PD adapter negotiation, polarity and cable. Do not assume a 12 V label
+means the sensor is receiving 12 V under startup load.
+
+Read README.md for ports, coordinate frames, test results and radar driver contract.
+No real LiDAR/radar detection is claimed until fresh hardware packets arrive.

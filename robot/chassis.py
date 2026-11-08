@@ -73,6 +73,9 @@ class Chassis:
         self._target = {m: 0.0 for m in MOTORS}
         self._current = {m: 0.0 for m in MOTORS}
         self._last_cmd = 0.0
+        self._generation = 0
+        self._brake_until = 0.0
+        self.reversal_brake_s = 0.12
         self._last_sent = 0.0
         self._closed = False
         self._ser = ser or open_port(port)
@@ -90,22 +93,36 @@ class Chassis:
 
     # ---- public API ---------------------------------------------------------
     def set_velocity(self, vx, vy, wz):
-        """Command a velocity; returns the target board duties. Repeat at >= 4 Hz (watchdog)."""
+        """Repeat at >=4 Hz. Neutral stops now; direction changes brake before reversing."""
         if self._closed or self.error:
             raise RuntimeError(f"chassis unavailable: {self.error or 'closed'}")
         w = mix(_clip(vx), _clip(vy), _clip(wz))
         target = {m: wheel_duty(w[m], self.min_duty, self.duty_cap) for m in MOTORS}
+        if not any(abs(v)>1e-6 for v in target.values()):
+            self.stop("neutral input")
+            return {m: 0.0 for m in MOTORS}
+        now = time.monotonic()
         with self._lock:
+            reversing = any(self._current[m]*target[m] < -1e-6 for m in MOTORS)
+            self._generation += 1
+            if reversing:
+                self._current = {m: 0.0 for m in MOTORS}
+                self._brake_until = now + self.reversal_brake_s
             self._target = target
-            self._last_cmd = time.monotonic()
+            self._last_cmd = now
+        if reversing:
+            self._send(STOP_FRAME, "direction-change brake", repeat=2)
         return {m: FORWARD_SIGN[m] * target[m] for m in MOTORS}
 
     def stop(self, reason="stop()"):
-        """Immediate stop: zero targets, skip slew, write STOP twice."""
+        """Invalidate queued motion before writing zero; no stale writer may revive it."""
         with self._lock:
+            self._generation += 1
             self._target = {m: 0.0 for m in MOTORS}
             self._current = {m: 0.0 for m in MOTORS}
-        self._send(STOP_FRAME, reason, repeat=2)
+            self._brake_until = 0.0
+            self._last_cmd = time.monotonic()
+        return self._send(STOP_FRAME, reason, repeat=2)
 
     def status(self):
         with self._lock:
@@ -155,9 +172,16 @@ class Chassis:
         if len(self.events) > 2000:
             del self.events[:1000]
 
-    def _send(self, data, why=None, repeat=1):
-        got = self._wlock.acquire(timeout=0.05)  # a stop must never wait long
+    def _send(self, data, why=None, repeat=1, generation=None):
+        got = self._wlock.acquire(timeout=0.05)
+        if not got:
+            self.error = "serial writer lock timed out"
+            self._log(self.error)
+            return False  # NEVER write without owning the UART writer lock.
         try:
+            with self._lock:
+                if generation is not None and generation != self._generation:
+                    return False  # A newer command or stop superseded this packet.
             for _ in range(repeat):
                 self._ser.write(data)
             self._ser.flush()
@@ -165,12 +189,13 @@ class Chassis:
             self._last_sent = time.monotonic()
             if why:
                 self._log(why)
+            return True
         except Exception as e:
             self.error = f"serial write failed: {e}"
             self._log(self.error)
+            return False
         finally:
-            if got:
-                self._wlock.release()
+            self._wlock.release()
 
     def _on_signal(self, signum, _frame):
         self.stop(f"signal {signal.Signals(signum).name}")
@@ -185,54 +210,60 @@ class Chassis:
     def _heartbeat(self):
         if self._deadman is None:
             return
+        if self.error:
+            try:
+                self._deadman.stdin.close()  # Trip the independent zero-only writer.
+            except Exception:
+                pass
+            return
         try:
             self._deadman.stdin.write(b".")
             self._deadman.stdin.flush()
         except Exception as e:
-            self._log(f"deadman heartbeat failed: {e}")
-            self._deadman = None
+            self.error = f"deadman heartbeat failed: {e}"
+            self._log(self.error)
+            self.stop("deadman heartbeat failed")
 
     def _control_loop(self):
         nxt = time.monotonic()
         prev = nxt
         try:
             while not self._closed:
+                if self.error:
+                    raise RuntimeError(self.error)
                 now = time.monotonic()
-                self._heartbeat()
                 with self._lock:
                     target, last = dict(self._target), self._last_cmd
-                    moving = any(abs(v) > 1e-6 for v in target.values()) or \
-                        any(abs(v) > 1e-6 for v in self._current.values())
-                # Trip 50 ms before watchdog_s and wake exactly at that deadline (see the sleep
-                # below), so tick alignment and scheduling jitter can't push the stop past
-                # watchdog_s. Measured before this change: 287 ms on hardware, 300.02 ms once in tests.
-                if moving and now - last >= self.trip_s:
-                    self.watchdog_trips += 1
-                    self.stop(f"watchdog: no command for {1000 * (now - last):.0f} ms")
-                else:
-                    step = self.slew * (now - prev)
-                    with self._lock:
-                        changed = False
+                    generation = self._generation
+                    moving = any(abs(v)>1e-6 for v in target.values()) or any(abs(v)>1e-6 for v in self._current.values())
+                    expired = moving and now-last >= self.trip_s
+                    changed = False
+                    if not expired:
+                        step = self.slew * (now-prev)
                         for m in MOTORS:
                             c, t = self._current[m], target[m]
-                            n = c + max(-step, min(step, t - c))
+                            n = 0.0 if now < self._brake_until else c+max(-step,min(step,t-c))
                             changed |= n != c
                             self._current[m] = n
                         cur = dict(self._current)
-                    keepalive = 0.1 if moving else 0.5
-                    if changed or now - self._last_sent >= keepalive:
-                        self._send(motor_frame({m: FORWARD_SIGN[m] * cur[m] for m in MOTORS}))
+                if expired:
+                    self.watchdog_trips += 1
+                    self.stop(f"watchdog: no command for {1000*(now-last):.0f} ms")
+                elif changed or now-self._last_sent >= (0.1 if moving else 0.5):
+                    self._send(motor_frame({m:FORWARD_SIGN[m]*cur[m] for m in MOTORS}),generation=generation)
+                self._heartbeat()
                 prev = now
                 nxt += self.dt
                 wake = nxt
                 with self._lock:
-                    if any(abs(v) > 1e-6 for v in self._current.values()) and self._last_cmd:
-                        wake = min(wake, self._last_cmd + self.trip_s)
-                time.sleep(max(0.0, wake - time.monotonic()))
+                    if any(abs(v)>1e-6 for v in self._current.values()) and self._last_cmd:
+                        wake = min(wake,self._last_cmd+self.trip_s)
+                time.sleep(max(0.0,wake-time.monotonic()))
         except Exception as e:
             self.error = f"control loop crashed: {e}"
             self._log(self.error)
             self.stop("control loop crash")
+            self._heartbeat()
 
     def _reader(self):
         parser = FrameParser()

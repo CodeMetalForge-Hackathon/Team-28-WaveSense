@@ -45,7 +45,7 @@ def main():
     signal.signal(signal.SIGINT, signal.SIG_IGN)   # parent's Ctrl-C is handled by the parent
     fd = sys.stdin.fileno()
     last_beat = time.monotonic()
-    silent_stop_sent = False
+    last_silent_stop = 0.0
     while True:
         r, _, _ = select.select([fd], [], [], 0.05)
         if r:
@@ -53,13 +53,13 @@ def main():
             if not data:
                 stop("parent closed the heartbeat pipe")
                 return
-            last_beat, silent_stop_sent = time.monotonic(), False
+            last_beat, last_silent_stop = time.monotonic(), 0.0
         if os.getppid() != parent:
             stop("parent process died")
             return
-        if time.monotonic() - last_beat > TIMEOUT and not silent_stop_sent:
+        if time.monotonic() - last_beat > TIMEOUT and time.monotonic() - last_silent_stop > 0.10:
             stop(f"no heartbeat for {TIMEOUT * 1000:.0f} ms")
-            silent_stop_sent = True    # re-armed by the next heartbeat
+            last_silent_stop = time.monotonic()  # Repeat zero while the controller remains silent.
 
 
 if __name__ == "__main__":
