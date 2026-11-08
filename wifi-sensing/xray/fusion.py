@@ -13,7 +13,7 @@ No result here is ever evidence that nobody is present.
 """
 from __future__ import annotations
 
-JUDGING = ("candidate_present", "no_candidate")
+JUDGING = ("candidate_present", "no_candidate", "changed")
 AGREE = 2           # links that must agree for a full CANDIDATE when two or more are judging
 
 LABELS = {
@@ -21,6 +21,7 @@ LABELS = {
     "weak_candidate": "WEAK CANDIDATE (one link only, others disagree): verify.",
     "no_candidate": "No candidate. This is NOT evidence that nobody is there.",
     "not_judging": "Not judging: no calibrated node with a usable link.",
+    "changed": "CHANGED since calibration on every judging link: a person, a moved object or drift. Verify.",
 }
 
 
@@ -38,6 +39,8 @@ def fuse(reports: dict) -> dict:
         state, basis = "candidate_present", f"{len(cands)} of {len(judging)} links agree"
     elif cands:
         state, basis = "weak_candidate", f"only 1 of {len(judging)} links (node {cands[0]})"
+    elif all(r["state"] == "changed" for r in judging.values()):
+        state, basis = "changed", f"{len(judging)} of {len(judging)} links changed, none with movement"
     else:
         state, basis = "no_candidate", f"0 of {len(judging)} links"
     return dict(state=state, basis=basis, label=LABELS[state], links_judging=sorted(judging),

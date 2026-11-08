@@ -118,15 +118,20 @@ class EngineSynthetic(unittest.TestCase):
         states = [r["state"] for r in reps]
         self.assertNotIn("candidate_present", states, states)
 
-    def test_3_still_breathing_person_nearby_is_a_candidate(self):
+    def test_3_still_breathing_person_nearby_is_flagged(self):
+        # A profile shift alone says "changed" (a person OR a moved object OR drift); breathing-like
+        # evidence makes it a person CANDIDATE. While the person is there it is never "no_candidate".
         self.scene.add("near_still", start=210, stop=300)
         reps = run(self.scene, self.engine, 210, 300)
-        first = next((r["t"] for r in reps if r["state"] == "candidate_present"), None)
+        flagged = ("changed", "candidate_present")
+        first = next((r["t"] for r in reps if r["state"] in flagged), None)
         self.assertIsNotNone(first, [r.get("profile_distance") for r in reps])
         self.assertLess(first - 210, 20)                   # within 20 s of sitting down
+        self.assertTrue(all(r["state"] in flagged for r in reps if r["t"] > 215), [r["state"] for r in reps])
+        self.assertTrue(any(r["state"] == "candidate_present" for r in reps))
         late = [r for r in reps if r["t"] > 260]
-        self.assertTrue(all(r["state"] == "candidate_present" for r in late))
         self.assertTrue(any(r["evidence"]["breathing"] for r in late))
+        self.assertFalse(any(r["evidence"]["motion"] for r in reps))      # a still person is not "motion"
         bpm = [r["breathing_bpm"] for r in late if r["evidence"]["breathing"]]
         self.assertAlmostEqual(float(np.median(bpm)), 15, delta=2.5)
 
@@ -169,7 +174,7 @@ class EngineEdges(unittest.TestCase):
         for _ in range(300):
             t += 0.03
             e.feed(parse_frame(dropped), t)
-        self.assertLess(e.gated - before, 120)                               # the median follows; frames flow again
+        self.assertLess(e.gated - before, 160)          # the running mode follows within ~half its window
         self.assertAlmostEqual(float(e.buf[-1][1][0]), abs(12 - 3j), places=4)
 
     def test_too_short_calibration_is_refused(self):

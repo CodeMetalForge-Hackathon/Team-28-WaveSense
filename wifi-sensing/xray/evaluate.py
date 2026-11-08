@@ -29,13 +29,18 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from xray.csi_packet import parse_frame  # noqa: E402
-from xray.engine import BREATH_WIN, Calibration, NearZoneEngine  # noqa: E402
+from xray.engine import BREATH_WIN, MIN_COVERAGE, Calibration, NearZoneEngine  # noqa: E402
+WARMUP = MIN_COVERAGE * BREATH_WIN      # the engine judges once 70% of its 30 s window is filled
 from xray.receiver import read_recording  # noqa: E402
 
 
 def label_of(path: str) -> str:
+    """empty | one | two | walk, from the file name; prefixes like 'alt-' or 'mot-' are ignored."""
     name = os.path.basename(path).lower()
-    for lab in ("empty", "one", "two"):
+    for prefix in ("alt-", "mot-"):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    for lab in ("empty", "one", "two", "walk"):
         if name.startswith(lab):
             return lab
     return "unlabelled"
@@ -73,16 +78,17 @@ def score(path: str, cal: Calibration, node: int | None = None) -> dict:
             continue
         t_first = t if t_first is None else t_first
         eng.feed(f, t)
-        if t - t_first >= BREATH_WIN and (last is None or t - last >= 1.0):
+        if t - t_first >= WARMUP and (last is None or t - last >= 1.0):
             reps.append(eng.assess(t))
             last = t
-    judged = [r for r in reps if r["state"] in ("candidate_present", "no_candidate")]
+    judged = [r for r in reps if r["state"] in ("candidate_present", "no_candidate", "changed")]
     cand = [r for r in judged if r["state"] == "candidate_present"]
     first = next((r["t"] - t_first for r in judged if r["state"] == "candidate_present"), None)
     med = lambda k: round(float(np.median([r[k] for r in judged])), 2) if judged else None
     return dict(file=os.path.basename(path), label=label_of(path), windows=len(reps), judged=len(judged),
                 poor_link=sum(r["state"] == "poor_link" for r in reps),
                 candidate_pct=round(100 * len(cand) / len(judged), 1) if judged else None,
+                changed_pct=round(100 * sum(r["state"] == "changed" for r in judged) / len(judged), 1) if judged else None,
                 first_candidate_s=None if first is None else round(first, 1),
                 median_profile_distance=med("profile_distance"), median_breathing_snr=med("breathing_snr"),
                 median_motion_ratio=med("motion_ratio"),
@@ -95,7 +101,7 @@ def summarise(rows: list[dict]) -> dict:
         n = sum(r["judged"] for r in sel)
         return None if n == 0 else round(sum(r["candidate_pct"] * r["judged"] for r in sel) / n, 1)
     return dict(false_candidate_pct_empty=pooled("empty"), detection_pct_one=pooled("one"),
-                detection_pct_two=pooled("two"), files=len(rows),
+                detection_pct_two=pooled("two"), detection_pct_walk=pooled("walk"), files=len(rows),
                 note="measured on these recordings only; one link; candidate = for a human to verify")
 
 
@@ -126,7 +132,7 @@ def main(argv=None) -> int:
         print(json.dumps(dict(rows=rows, summary=summary), indent=1))
         return 0
     for r in rows:
-        print(f"{r['file']:<38} {r['label']:<6} judged {r['judged']:>4}  candidate {r['candidate_pct']}%  "
+        print(f"{r['file']:<38} {r['label']:<6} judged {r['judged']:>4}  candidate {r['candidate_pct']}%  changed {r['changed_pct']}%  "
               f"first {r['first_candidate_s']} s  profile {r['median_profile_distance']}  "
               f"breath SNR {r['median_breathing_snr']}  motion {r['median_motion_ratio']}  poor {r['poor_link']}")
     if summary:

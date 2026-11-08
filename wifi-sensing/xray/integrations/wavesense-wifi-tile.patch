@@ -1,5 +1,5 @@
---- a/camera_preview.py	2026-11-07 20:32:04.260967337 -0500
-+++ b/camera_preview.py	2026-11-07 20:32:04.276947380 -0500
+--- a/camera_preview.py	2026-11-07 22:34:56.480047980 -0500
++++ b/camera_preview.py	2026-11-07 22:34:56.489301315 -0500
 @@ -24,6 +24,23 @@
  from urllib.request import Request, urlopen
  
@@ -38,14 +38,14 @@
              time.sleep(1)
  
      def status(self, session):
---- a/live.js	2026-11-07 20:32:04.261042744 -0500
-+++ b/live.js	2026-11-07 20:32:04.277049843 -0500
+--- a/live.js	2026-11-07 22:34:56.483440467 -0500
++++ b/live.js	2026-11-07 22:34:56.491034809 -0500
 @@ -9,7 +9,9 @@
    const offline=(label,reason='Connecting')=>'<div class="feed-offline"><span class="offline-symbol">⌁</span><span>'+label+'</span><small>'+esc(reason)+'</small></div>';
    function find(obj,key){if(!obj||typeof obj!=='object')return null;if(key in obj)return obj[key];for(const v of Object.values(obj)){if(v&&typeof v==='object'){const r=find(v,key);if(r!==null)return r}}return null}
    function media(kind){return '<div class="feed-shell reconnecting" data-sensor="'+kind+'"><img class="live-feed" alt="Live '+kind+' feed"><div class="feed-recover"><span>Connecting</span><small></small></div><span class="stream-age"></span></div>'}
 -  function wifi(){const s=status?.wifi;if(!s?.online)return offline('Wi-Fi',s?.reason||'Connecting');const motion=find(s.nodes,'motion_level');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>CSI connected</b><span>'+esc(motion||'Receiving real CSI data')+'</span><small>Experimental · no calibrated position</small></div>'}
-+  const XRAY_TEXT={candidate_present:'CANDIDATE: verify',weak_candidate:'WEAK CANDIDATE: verify',no_candidate:'No candidate',not_judging:'Not judging'};
++  const XRAY_TEXT={candidate_present:'CANDIDATE: verify',weak_candidate:'WEAK CANDIDATE: verify',changed:'CHANGED: verify',no_candidate:'No candidate',not_judging:'Not judging'};
 +  function xray(x){if(!x.frames)return offline('Wi-Fi',x.hint||'No CSI from the ESP32 yet');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>'+esc(XRAY_TEXT[x.state]||x.state||'-')+'</b><span>'+esc(x.hint||x.label||'')+'</span><small>Near-sensor check only · no location · no count · '+esc(x.basis||'')+'</small></div>'}
 +  function wifi(){const s=status?.wifi;if(s?.xray?.online)return xray(s.xray);if(!s?.online)return offline('Wi-Fi',s?.reason||'Connecting');const motion=find(s.nodes,'motion_level');return '<div class="wifi-live"><span class="signal-icon">⌁</span><b>CSI connected</b><span>'+esc(motion||'Receiving real CSI data')+'</span><small>Experimental · no calibrated position</small></div>'}
    function lidar(){return LidarView.render()}

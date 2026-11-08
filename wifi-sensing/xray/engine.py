@@ -70,18 +70,25 @@ class NearZoneEngine:
     # BREATH_FLOOR: pure-noise SNR measured median 11, p95 23, max 28 over 200 synthetic trials
     BREATH_K, BREATH_FLOOR, BREATH_CONSISTENCY = 1.5, 30.0, 0.5
     MOTION_HIGH = 4.0             # motion / calibration median above which breathing is not judged
+    # Motion evidence: motion > MOTION_K x the calibration's p95 (floor: MOTION_FLOOR x its median).
+    # 2026-11-07 recordings (one link, threshold chosen ON these recordings, so not yet held out):
+    # walking through the link 100% of windows above 2x p95; empty 0-10% (one segment 50%, something
+    # moved); still seated 0-15%. A still person is NOT detected by motion.
+    MOTION_K, MOTION_FLOOR = 2.5, 4.0
     ON_COUNT, OFF_COUNT = 3, 10   # hysteresis, in assess() calls (~seconds)
-    # Frames this far below the node's median RSSI come from another, distant transmitter on the
-    # channel (measured 2026-11-07: ~2% of frames at -90..-94 dBm vs the hotspot at -67..-69). Their
-    # channel is unrelated, so they are dropped. 15 dB leaves room for a body blocking the link; the
-    # median includes dropped frames, so a lasting drop of the real link is followed within ~200 frames.
-    RSSI_GATE_DB, RSSI_GATE_MIN = 15.0, 50
+    # Own-link gate. The node also captures frames from OTHER transmitters on the channel, and their
+    # channel shape is unrelated. Measured 2026-11-07 (12-bit decoding, empty room): 64% of frames sat
+    # within -45..-40 dBm and matched each other's shape (corr 0.995); the other 36% were 5+ dB weaker
+    # with shape corr about 0, and a 15 dB gate let 25% of all frames through, enough to fake drift.
+    # Keep frames within RSSI_BAND_DB of the running RSSI mode (all frames, kept or not, over the last
+    # RSSI_WINDOW frames, ~10 s), so a lasting change of the real link (a body in the path) is followed.
+    RSSI_BAND_DB, RSSI_WINDOW, RSSI_GATE_MIN = 3, 300, 50
 
     def __init__(self, calibration: Calibration | None = None, max_rate_hz: float = 100.0):
         self.cal = calibration
         self.buf = collections.deque(maxlen=int(BREATH_WIN * max_rate_hz * 1.5))
         self.rssi = collections.deque(maxlen=200)
-        self._rssi_all = collections.deque(maxlen=200)
+        self._rssi_all = collections.deque(maxlen=self.RSSI_WINDOW)
         self.gated = 0
         self._calib: list | None = None
         self._calib_mask: np.ndarray | None = None
@@ -90,11 +97,12 @@ class NearZoneEngine:
 
     # ---- input ---------------------------------------------------------------
     def feed(self, frame, t: float) -> None:
-        self._rssi_all.append(frame.rssi)
-        if (self.RSSI_GATE_DB is not None and len(self._rssi_all) >= self.RSSI_GATE_MIN
-                and frame.rssi < float(np.median(self._rssi_all)) - self.RSSI_GATE_DB):
-            self.gated += 1
-            return
+        self._rssi_all.append(int(round(frame.rssi)))
+        if self.RSSI_BAND_DB is not None and len(self._rssi_all) >= self.RSSI_GATE_MIN:
+            vals, counts = np.unique(np.fromiter(self._rssi_all, int), return_counts=True)
+            if abs(frame.rssi - vals[counts.argmax()]) > self.RSSI_BAND_DB:
+                self.gated += 1
+                return
         amp = frame.amplitude
         if self.buf and len(self.buf[-1][1]) != len(amp):
             self.buf.clear()                       # subcarrier layout changed (e.g. HT -> HE)
@@ -180,21 +188,34 @@ class NearZoneEngine:
         c = self.cal
         dist = dsp.profile_distance(f["profile"], np.array(c.profile), np.array(c.sigma))
         motion_ratio = f["motion"] / max(c.motion_median, 1e-9)
+        motion_thr = max(self.MOTION_K * c.motion_p95, self.MOTION_FLOOR * c.motion_median)
+        motion_hit = f["motion"] > motion_thr
         prof_thr = max(self.PROFILE_FLOOR, self.PROFILE_K * c.profile_dist_p95)
         breath_thr = max(self.BREATH_FLOOR, self.BREATH_K * c.breath_snr_p95)
         profile_hit = dist > prof_thr
         breath_hit = (f["breath_snr"] > breath_thr and f["breath_consistency"] >= self.BREATH_CONSISTENCY
                       and motion_ratio < self.MOTION_HIGH)
-        raw = profile_hit or breath_hit
+        # A person CANDIDATE needs person-like dynamics: motion, or breathing-like periodicity.
+        # A profile shift alone is reported as "changed": on 2026-11-07 a moved chair and drift shifted
+        # the profile as much as a seated person did, so it cannot say "person".
+        raw = motion_hit or breath_hit
         self._on, self._off = (self._on + 1, 0) if raw else (0, self._off + 1)
         if not self.occupied and self._on >= self.ON_COUNT:
             self.occupied = True
         elif self.occupied and self._off >= self.OFF_COUNT:
             self.occupied = False
-        out.update(state="candidate_present" if self.occupied else "no_candidate",
-                   evidence=dict(profile=bool(profile_hit), breathing=bool(breath_hit)),
+        if self.occupied:
+            state, label = "candidate_present", ("CANDIDATE near the sensor (movement or breathing-like): verify. "
+                                                 "Not a confirmed person; no location; no count.")
+        elif profile_hit:
+            state, label = "changed", ("CHANGED since calibration: a person, a moved object or drift. Verify; "
+                                       "recalibrate if the zone is really empty.")
+        else:
+            state, label = "no_candidate", "No candidate. This is NOT evidence that nobody is there."
+        out.update(state=state, label=label,
+                   evidence=dict(motion=bool(motion_hit), breathing=bool(breath_hit), profile=bool(profile_hit)),
                    profile_distance=round(dist, 2), profile_threshold=round(prof_thr, 2),
                    breathing_threshold=round(breath_thr, 2), motion_ratio=round(motion_ratio, 2),
-                   motion=("high" if motion_ratio >= self.MOTION_HIGH else "some" if motion_ratio >= 2 else "low"),
-                   label="CANDIDATE near the sensor: verify. Not a confirmed person; no location; no count.")
+                   motion_threshold_ratio=round(motion_thr / max(c.motion_median, 1e-9), 2),
+                   motion="high" if motion_hit else "some" if f["motion"] > c.motion_p95 else "low")
         return out

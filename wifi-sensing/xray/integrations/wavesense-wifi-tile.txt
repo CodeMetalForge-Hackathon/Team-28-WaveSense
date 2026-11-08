@@ -7,7 +7,7 @@ WHAT IT CHANGES (2 files, about 25 lines)
   as status.wifi.xray: zone state, label, hint, frame count, per-node state.
   RuView polling is unchanged.
 - live.js: when wifi-xray is running, the Wi-Fi tile shows its state:
-    "CANDIDATE: verify" / "WEAK CANDIDATE: verify" / "No candidate" / "Not judging"
+    "CANDIDATE: verify" / "WEAK CANDIDATE: verify" / "CHANGED: verify" / "No candidate" / "Not judging"
   with "Near-sensor check only · no location · no count".
   While no CSI frames arrive, the tile shows OFFLINE plus the reason (for example
   "No device has joined the hotspot..."), never a false LIVE.
