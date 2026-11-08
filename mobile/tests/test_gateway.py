@@ -102,3 +102,22 @@ class WarmMotorSafety(unittest.TestCase):
   self.assertFalse(self.app.motors.closed)
   with patch.object(gateway.time,'monotonic',return_value=131):self.watchdog_once()
   self.assertTrue(self.app.motors.closed)
+
+class RadarRelearnAfterDriving(unittest.TestCase):
+ def setUp(self):
+  helper=GatewayTests();helper.setUp();self.app=helper.app;self.calls=[]
+ def post(self):self.calls.append(1)
+ def at(self,now,post=None):
+  with patch.object(gateway.time,'monotonic',return_value=now):self.app.tell_radar_if_stopped(post or self.post)
+ def test_told_once_after_the_wheels_stop(self):
+  self.app.last_motion_at=100
+  self.at(100.5);self.assertEqual(self.calls,[])
+  self.at(101.5);self.at(102);self.assertEqual(self.calls,[1])
+ def test_each_new_drive_is_reported(self):
+  self.app.last_motion_at=100;self.at(102)
+  self.app.last_motion_at=110;self.at(112);self.assertEqual(self.calls,[1,1])
+ def test_never_driven_tells_nothing(self):
+  self.at(500);self.assertEqual(self.calls,[])
+ def test_radar_being_off_is_harmless(self):
+  def down():raise OSError('refused')
+  self.app.last_motion_at=100;self.at(102,down);self.assertEqual(self.app.radar_told_of_motion,100)

@@ -33,6 +33,10 @@ APP_SLEW = 1000.0
 SIGNS = {1: -1, 2: 1, 3: -1, 4: 1}
 
 
+def post_radar_moved():
+    urlopen(Request('http://127.0.0.1:3101/platform/moved', data=b'', method='POST'), timeout=1).close()
+
+
 class StaleCommand(ValueError):
     pass
 
@@ -177,6 +181,7 @@ class Gateway:
         from person_vision import PersonVision
         self.vision = PersonVision(self.camera, ROOT)
         self.last_motion_at = 0
+        self.radar_told_of_motion = 0
         self.motor_idle_until = 0
         from sensor_modes import SensorModes
         self.lidar_enabled = threading.Event()
@@ -190,7 +195,18 @@ class Gateway:
             self.sensor_modes.recover_radar()
             self.radar = read_radar(self.args.radar_status_file) if self.sensor_modes.enabled["radar"] else {"online":False,"tracks":[],"reason":"Radar off"}
             if self.radar.get('online'):self.sensor_modes.restart_failures=0
+            self.tell_radar_if_stopped()
             time.sleep(.3)
+
+    def tell_radar_if_stopped(self, post=post_radar_moved):
+        """A move invalidates what the radar learned, so it relearns once the wheels have stopped."""
+        if self.last_motion_at == self.radar_told_of_motion or time.monotonic() - self.last_motion_at < 1:
+            return
+        self.radar_told_of_motion = self.last_motion_at
+        try:
+            post()
+        except OSError:
+            pass  # Radar off or restarting: it relearns on start anyway.
 
     def start_lidar(self):
         self.lidar_stopped.clear()

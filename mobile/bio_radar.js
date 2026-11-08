@@ -1,15 +1,17 @@
-/* Bio Radar: radar candidates drawn over the camera when the operator turns it on.
-   The switch only shows or hides the overlay. The radar keeps running, because restarting it
-   costs a relearn of about 25 s and its start-up surge has dropped the USB bus before.
-   Radar measures range and at most one azimuth, so height and body shape here are assumed.
-   A blob is a place to check, not a confirmed person; no blob is not an all-clear. */
+/* Bio Radar: radar candidates drawn in the camera person detector's box language.
+   A candidate the camera also sees is drawn on the detector's own box. One the camera cannot see
+   gets an orange box of its own, placed from the radar's bearing, with an assumed person size.
+   The switch only shows or hides this. The radar keeps running, because restarting it costs a
+   relearn of about 25 s and its start-up surge has dropped the USB bus before.
+   A box is a place to check, not a confirmed person; no box is not an all-clear. */
 globalThis.BioRadar=(()=>{
- // Not measured yet. flip and yawDeg are set from a person standing at known positions.
- const CALIBRATION={hfovDeg:70,yawDeg:0,flip:false,personHeightM:1.7};
- const STORAGE_KEY='wavesense.bioRadar',STALE_MS=1200,MAX_BLOBS=3,TICK_MS=40;
- const BEARING_ERROR_DEG=8,MIN_RANGE_M=.2,MAX_RANGE_M=12;
+ // Not measured yet. Until verified, a radar return is not matched to a camera box by angle.
+ const CALIBRATION={hfovDeg:70,yawDeg:0,flip:false,verified:false,personHeightM:1.7};
+ const STORAGE_KEY='wavesense.bioRadar',STALE_MS=1200,MAX_ITEMS=3,TICK_MS=50,MATCH_DEG=18,PERSON_HOLD_MS=1500;
+ const MIN_RANGE_M=.2,MAX_RANGE_M=12,PERSON_ASPECT=.42,ORANGE='#ff8a3c';
+ const HEAT='<defs><radialGradient id="bio-heat"><stop offset="0" stop-color="#ffb45a" stop-opacity=".42"/><stop offset=".55" stop-color="#f0602f" stop-opacity=".3"/><stop offset=".85" stop-color="#aa2a64" stop-opacity=".14"/><stop offset="1" stop-color="#aa2a64" stop-opacity="0"/></radialGradient></defs>';
  const finite=Number.isFinite,clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rad=d=>d*Math.PI/180;
- let enabled=false,current=null,received=0,sprites=null,shown=[];
+ let enabled=false,current=null,received=0,eased=[],personSeenAt=-Infinity;
  try{enabled=localStorage.getItem(STORAGE_KEY)==='1'}catch{}
 
  function visibleArea(w,h,view){
@@ -18,50 +20,76 @@ globalThis.BioRadar=(()=>{
   const visibleW=Math.min(w,h*a),visibleH=Math.min(h,w/a);
   return{left:(w-visibleW)/2,right:(w+visibleW)/2,top:(h-visibleH)/2,bottom:(h+visibleH)/2};
  }
- function blobFor(track,w,h,area,focal){
-  const r=track?.range_m;
-  if(!finite(r)||r<MIN_RANGE_M||r>MAX_RANGE_M)return null;
-  const areaW=area.right-area.left,areaH=area.bottom-area.top,cy=(area.top+area.bottom)/2,b=track.bearing_deg;
-  if(!finite(b))return{kind:'unknown',cx:(area.left+area.right)/2,cy,rx:areaW*.48,ry:areaH*.2,range_m:r,edge:null};
-  const azimuth=clamp((CALIBRATION.flip?-b:b)+CALIBRATION.yawDeg,-85,85),x=w/2+focal*Math.tan(rad(azimuth));
-  const personH=focal*CALIBRATION.personHeightM/r,ry=clamp(personH/2,areaH*.14,areaH*.36);
-  const rx=Math.max(ry*.45,focal*Math.tan(rad(BEARING_ERROR_DEG)));
-  const edge=x<area.left?'left':x>area.right?'right':null;
-  return{kind:'located',cx:clamp(x,area.left,area.right),cy,rx,ry,range_m:r,edge};
+ const azimuth=b=>clamp((CALIBRATION.flip?-b:b)+CALIBRATION.yawDeg,-85,85);
+ function matchBox(track,boxes,used,w,focal){
+  const free=boxes.map((box,i)=>({box,i})).filter(x=>!used.has(x.i));
+  if(!free.length)return null;
+  if(!CALIBRATION.verified||!finite(track.bearing_deg)){
+   const area=({box:[a,b,c,d]})=>(c-a)*(d-b);
+   return free.reduce((best,x)=>area(x)>area(best)?x:best);
+  }
+  const off=({box})=>Math.abs(Math.atan(((box[0]+box[2])/2-w/2)/focal)*180/Math.PI-azimuth(track.bearing_deg));
+  const nearest=free.reduce((best,x)=>off(x)<off(best)?x:best);
+  return off(nearest)<=MATCH_DEG?nearest:null;
  }
- function plan(s,view){
-  const radar=s?.radar,evidence=s?.evidence,camera=s?.camera;
-  if(!radar?.online)return{state:'offline',blobs:[]};
-  if(evidence?.state==='paused')return{state:'paused',blobs:[]};
-  if(!evidence?.radar_candidate)return{state:evidence?.state==='clear'?'clear':'learning',blobs:[]};
-  if(!camera?.online)return{state:'no-camera',blobs:[]};
+ function radarBox(range,bearing,w,area,focal){
+  const areaH=area.bottom-area.top,height=clamp(focal*CALIBRATION.personHeightM/range,areaH*.28,areaH*.72),width=height*PERSON_ASPECT;
+  const x=w/2+focal*Math.tan(rad(azimuth(bearing))),edge=x<area.left?'left':x>area.right?'right':null;
+  const cx=clamp(x,area.left+width/2,area.right-width/2),cy=(area.top+area.bottom)/2;
+  return{box:[cx-width/2,cy-height/2,cx+width/2,cy+height/2],edge};
+ }
+ function plan(s,view,elapsed=0,personJustSeen=false){
+  const radar=s?.radar,evidence=s?.evidence,camera=s?.camera,none=state=>({state,items:[],unknownRange:null});
+  if(!radar?.online)return none('offline');
+  if(evidence?.state==='paused')return none('paused');
+  if(!evidence?.radar_candidate)return none(evidence?.state==='clear'?'clear':'learning');
+  if(!camera?.online)return none('no-camera');
   const res=camera.resolution,w=Array.isArray(res)&&res[0]>0?res[0]:640,h=Array.isArray(res)&&res[1]>0?res[1]:480;
   const area=visibleArea(w,h,view),focal=(w/2)/Math.tan(rad(CALIBRATION.hfovDeg/2));
-  const blobs=(Array.isArray(radar.tracks)?radar.tracks:[]).slice(0,MAX_BLOBS).map(t=>blobFor(t,w,h,area,focal)).filter(Boolean);
-  return{state:blobs.length?'candidate':'learning',width:w,height:h,area,blobs};
- }
-
- // Magma ramp from a deep magenta rim to a pale core, so it reads on dark and bright scenes.
- const RAMP=[[0,[176,36,92]],[.3,[232,84,42]],[.65,[255,150,60]],[1,[255,204,120]]];
- function ramp(t){for(let i=1;i<RAMP.length;i++){const[p,a]=RAMP[i-1],[q,b]=RAMP[i];if(t<=q){const k=(t-p)/(q-p);return a.map((v,c)=>v+(b[c]-v)*k)}}return RAMP[RAMP.length-1][1]}
- function smooth(a,b,v){const t=clamp((v-a)/(b-a),0,1);return t*t*(3-2*t)}
- const gauss=(a,b)=>Math.exp(-(a*a+b*b));
- function paintSprite(W,H,field){
-  const c=document.createElement('canvas');c.width=W;c.height=H;
-  const g=c.getContext('2d'),image=g.createImageData(W,H);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-   const f=field((x+.5)/W*2-1,(y+.5)/H*2-1),t=clamp((f-.16)/.84,0,1),rim=Math.exp(-(((f-.22)/.05)**2)),[r,gr,b]=ramp(t),i=(y*W+x)*4;
-   image.data[i]=clamp(r+rim*40,0,255);image.data[i+1]=clamp(gr+rim*46,0,255);image.data[i+2]=b;
-   image.data[i+3]=255*smooth(.16,.26,f)*Math.min(.72,.28+.26*t+rim*.42);
+  const boxes=globalThis.PersonOverlay?.plan(s.vision,camera,elapsed)?.boxes||[],used=new Set(),items=[];
+  let unknownRange=null,heldRange=null;
+  for(const t of (Array.isArray(radar.tracks)?radar.tracks:[]).slice(0,MAX_ITEMS)){
+   const range=t?.range_m;
+   if(!finite(range)||range<MIN_RANGE_M||range>MAX_RANGE_M)continue;
+   const hit=matchBox(t,boxes,used,w,focal);
+   if(hit){used.add(hit.i);items.push({kind:'confirmed',box:hit.box,range_m:range})}
+   // The detector's boxes expire within half a second; a gap must not spawn a second marker.
+   else if(!boxes.length&&personJustSeen)heldRange=heldRange??range;
+   else if(finite(t.bearing_deg))items.push({kind:'radar',range_m:range,...radarBox(range,t.bearing_deg,w,area,focal)});
+   else if(unknownRange===null)unknownRange=range;
   }
-  g.putImageData(image,0,0);return c.toDataURL();
+  return{state:items.length||unknownRange!==null||heldRange!==null?'candidate':'learning',width:w,height:h,area,items,unknownRange,heldRange};
  }
- function loadSprites(){sprites=sprites||{
-  // A soft upright mass: the radar measures no pose, so it has no limbs to imply one.
-  located:paintSprite(120,240,(u,v)=>Math.max(gauss(u/.36,(v+.66)/.21),gauss(u/.56,(v-.06)/.62))),
-  unknown:paintSprite(240,90,(u,v)=>gauss(u/.92,v/.62))};return sprites}
 
- function words(b){const m='~'+b.range_m.toFixed(1)+' m';return b.kind==='unknown'?['Direction unknown',m]:['Possible person',(b.edge==='left'?'◀ ':'')+m+(b.edge==='right'?' ▶':'')]}
+ // The radar updates once a second; only its own boxes glide. Camera boxes stay exact.
+ function settle(items){
+  let n=0;
+  const out=items.map(item=>{
+   if(item.kind!=='radar')return item;
+   const last=eased[n],box=last?item.box.map((v,i)=>last[i]+(v-last[i])*.18):item.box;
+   eased[n++]=box;
+   return{...item,box};
+  });
+  eased.length=n;
+  return out;
+ }
+ function corners([x1,y1,x2,y2]){
+  const k=Math.min(24,(x2-x1)/4,(y2-y1)/4);
+  return [[x1,y1,1,1],[x2,y1,-1,1],[x1,y2,1,-1],[x2,y2,-1,-1]].map(([x,y,sx,sy])=>`M${x+sx*k} ${y}H${x}V${y+sy*k}`).join('');
+ }
+ function caption(item,area){
+  const m='~'+item.range_m.toFixed(1)+' m';
+  if(item.kind==='confirmed')return{text:'RADAR '+m,y:Math.max(area.top+18,item.box[1]+18)};
+  return{text:(item.edge==='left'?'◀ ':'')+'RADAR ? '+m+(item.edge==='right'?' ▶':''),y:Math.max(area.top+13,item.box[1]-5)};
+ }
+ function markup(item,area,mini){
+  const[x1,y1,x2,y2]=item.box,glow=`<ellipse cx="${(x1+x2)/2}" cy="${(y1+y2)/2}" rx="${(x2-x1)/2}" ry="${(y2-y1)/2}" fill="url(#bio-heat)"/>`;
+  const bracket=`<path d="${corners(item.box)}" fill="none" stroke="${ORANGE}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  if(mini)return glow+bracket;
+  const{text,y}=caption(item,area);
+  return glow+bracket+`<text x="${Math.max(area.left+6,x1+6)}" y="${y}" fill="${ORANGE}" stroke="#111" stroke-width="3" paint-order="stroke" font-family="sans-serif" font-size="13">${text}</text>`;
+ }
+
  const stateText={offline:'No signal',paused:'Paused','no-camera':'No camera',learning:'Learning',clear:'Scanning'};
  function paintButton(root,p){
   let button=root.querySelector('.bio-toggle');
@@ -71,47 +99,29 @@ globalThis.BioRadar=(()=>{
    button.onclick=()=>{enabled=!enabled;try{localStorage.setItem(STORAGE_KEY,enabled?'1':'0')}catch{}paint()};
    root.append(button);
   }
-  const candidate=p.blobs[0],state=!enabled?'Off':candidate?'~'+candidate.range_m.toFixed(1)+' m':stateText[p.state]||'Scanning';
+  const range=p.items[0]?.range_m??p.heldRange??p.unknownRange,state=!enabled?'Off':finite(range)?'~'+range.toFixed(1)+' m':stateText[p.state]||'Scanning';
   button.setAttribute('aria-pressed',String(enabled));
   button.setAttribute('aria-label','Bio Radar overlay '+(enabled?'on':'off')+'. '+state);
   button.querySelector('.bio-state').textContent=state;
-  button.querySelector('.bio-note').textContent=enabled&&p.state==='clear'?'not an all-clear':enabled&&candidate?'verify':'';
+  button.querySelector('.bio-note').textContent=!enabled?'':p.state==='clear'?'not an all-clear':p.items.length||finite(p.heldRange)?'verify':finite(range)?'direction unknown':'';
  }
- function ease(from,to){return from===undefined?to:from+(to-from)*.11}
- function svgNode(name,parent){const n=document.createElementNS('http://www.w3.org/2000/svg',name);parent.append(n);return n}
  function paintShell(shell,now){
   let svg=shell.querySelector('.bio-overlay');
   const mini=!!shell.closest('.mini-swap'),view={fit:mini?'meet':'slice',aspect:shell.clientWidth/shell.clientHeight};
-  const fresh=enabled&&current&&now-received<=STALE_MS,p=fresh?plan(current,view):{blobs:[]};
-  shown.forEach(s=>{s.seen=false});
-  p.blobs.forEach((b,i)=>{const s=shown[i]||(shown[i]={o:0});Object.assign(s,{seen:true,kind:b.kind,edge:b.edge,range_m:b.range_m,cx:ease(s.cx,b.cx),cy:ease(s.cy,b.cy),rx:ease(s.rx,b.rx),ry:ease(s.ry,b.ry),area:p.area,width:p.width,height:p.height})});
-  shown.forEach(s=>{s.o+=((s.seen?1:0)-s.o)*(s.seen?.14:.2)});
-  shown=shown.filter(s=>s.seen||s.o>.02);
-  if(!shown.length){svg?.remove();return}
+  const p=enabled&&current&&now-received<=STALE_MS?plan(current,view,now-received,now-personSeenAt<PERSON_HOLD_MS):null;
+  if(!p||!p.items.length){eased.length=0;svg?.remove();return}
   if(!svg){svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('bio-overlay');svg.setAttribute('aria-hidden','true');shell.append(svg)}
   svg.setAttribute('preserveAspectRatio',mini?'xMidYMid meet':'xMidYMid slice');
-  svg.setAttribute('viewBox','0 0 '+shown[0].width+' '+shown[0].height);
-  const art=loadSprites(),reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,pulse=reduced?.9:.86+.14*Math.sin(now/350);
-  while(svg.children.length>shown.length*2)svg.lastChild.remove();
-  while(svg.children.length<shown.length*2){svgNode('image',svg);const t=svgNode('text',svg);t.classList.add('bio-label');svgNode('tspan',t);svgNode('tspan',t).setAttribute('dy','1.2em')}
-  shown.forEach((s,i)=>{
-   const image=svg.children[i*2],text=svg.children[i*2+1],href=art[s.kind];
-   if(image.getAttribute('href')!==href)image.setAttribute('href',href);
-   image.setAttribute('preserveAspectRatio','none');
-   image.setAttribute('x',s.cx-s.rx);image.setAttribute('y',s.cy-s.ry);image.setAttribute('width',2*s.rx);image.setAttribute('height',2*s.ry);
-   image.setAttribute('opacity',(s.o*pulse*(s.kind==='unknown'?.5:1)).toFixed(3));
-   // On the blob's own core: the corners of the view belong to the map, button and sticks.
-   const[first,second]=mini?['','']:words(s),x=clamp(s.cx,s.area.left+58,s.area.right-58);
-   text.setAttribute('y',s.cy);
-   [first,second].forEach((line,n)=>{const span=text.children[n];span.textContent=line;span.setAttribute('x',x)});
-   text.setAttribute('opacity',s.o.toFixed(3));
-  });
+  svg.setAttribute('viewBox',`0 0 ${p.width} ${p.height}`);
+  svg.innerHTML=HEAT+settle(p.items).map(item=>markup(item,p.area,mini)).join('');
  }
  function paint(){
   if(typeof document==='undefined')return;
   const root=document.querySelector('.phone');if(!root)return;
   const now=performance.now(),shell=root.querySelector('.feed-shell[data-sensor="camera"]');
-  paintButton(root,enabled&&current&&now-received<=STALE_MS?plan(current,{}):enabled?{state:'offline',blobs:[]}:{blobs:[]});
+  const fresh=enabled&&current&&now-received<=STALE_MS;
+  if(current&&globalThis.PersonOverlay?.plan(current.vision,current.camera,now-received)?.boxes?.length)personSeenAt=now;
+  paintButton(root,fresh?plan(current,{},now-received,now-personSeenAt<PERSON_HOLD_MS):{state:enabled?'offline':undefined,items:[],unknownRange:null});
   if(shell)paintShell(shell,now);
  }
  function update(root,s){if(s!==current){current=s;received=performance.now()}paint()}

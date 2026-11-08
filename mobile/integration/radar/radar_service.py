@@ -38,6 +38,7 @@ from radar_scene import RadarScene
 
 REC = struct.Struct("<dHH")
 CONTRACT_DEFAULT = "/srv/team28/runtime/radar/status.json"
+SETTLE_S = 10.0     # after the robot stops: long enough for a judging window free of its own motion
 
 
 def contract_payload(report: dict, now: float, online: bool = True) -> dict:
@@ -91,6 +92,7 @@ class RadarService:
                                 getattr(device,'rx_calibration',None), 299792458/(2*device.bandwidth))
         self.scene_error = None
         self.bearing_error = None
+        self.settle_until = 0.0
         self.lock, self.stop = threading.Lock(), threading.Event()
         self.report: dict = dict(state="starting")
         self.rec = None
@@ -142,6 +144,21 @@ class RadarService:
                     print(time.strftime("%T"), "radar reopened; awaiting frames", flush=True)
                     break
 
+    def platform_moved(self) -> dict:
+        """The robot moved. Its own motion is in the buffer and the learned background describes
+        the place it left, so both would read as a person; start again from the new position."""
+        with self.lock:
+            self.eng.buf.clear()
+            self.eng._acc, self.eng._acc_t = [], []
+            self.eng.reset_background()
+            self.settle_until = time.time() + SETTLE_S
+        return dict(ok=True, settle_s=SETTLE_S)
+
+    def settled(self, report: dict) -> dict:
+        if report.get("t", 0) < self.settle_until:
+            return dict(state="settling", valid=False, detail="robot moved: relearning the scene", t=report.get("t"))
+        return report
+
     def bearing_at(self, now: float, seconds: float, range_m: float, cal) -> dict | None:
         samples = self.eng.slow_time(now, seconds, range_m)
         return None if samples is None else estimate_bearing(samples, cal, self.dev.wavelength)
@@ -176,7 +193,7 @@ class RadarService:
         while not self.stop.wait(1.0):
             try:
                 with self.lock:
-                    r = self.eng.assess(time.time())
+                    r = self.settled(self.eng.assess(time.time()))
                     self.add_bearing(r)
             except Exception as e:                  # never let the status (and the app file) go stale
                 r = dict(state="no_data", valid=False, detail=f"engine error: {type(e).__name__}: {e}", t=time.time())
@@ -267,7 +284,7 @@ def make_http(svc: RadarService, port: int) -> ThreadingHTTPServer:
         def do_POST(self):
             url = urlparse(self.path)
             routes = {"/calibrate/start": svc.calibrate_start, "/calibrate/finish": svc.calibrate_finish,
-                      "/record/stop": svc.record_stop}
+                      "/record/stop": svc.record_stop, "/platform/moved": svc.platform_moved}
             if url.path in routes:
                 return self.reply(200, routes[url.path]())
             if url.path == "/record/start":
