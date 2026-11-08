@@ -147,6 +147,9 @@ class Gateway:
         self.map_feed = None
         self.cloud = None
         self.radar = {"online":False,"reason":"Radar driver feed unavailable"}
+        from person_vision import PersonVision
+        self.vision = PersonVision(self.camera, ROOT)
+        self.last_motion_at = 0
 
     def radar_poll(self):
         from radar_status import read_radar
@@ -182,7 +185,7 @@ class Gateway:
                 nearby = proximity.assess(sample['data'] if fresh else None, sample['last_seen'])
                 mapping = self.map_feed.update(self.slam.snapshot(), fresh) if self.slam else {
                     'online': False, 'available': False, 'status': 'unavailable', 'detail': mapping_error}
-                self.lidar = {'online': fresh, 'reason': sample['status'],
+                self.lidar = {'mode':'2d', 'online': fresh, 'reason': sample['status'],
                               'fps': sample['fps'], 'age_ms': sample['age_ms'],
                               'frames': sample['frames'], 'reconnects': sample['reconnects'],
                               'points': points.tolist() if hasattr(points, 'tolist') else [],
@@ -195,6 +198,8 @@ class Gateway:
 
     def close(self):
         self.disarm('Server stopped')
+        if self.vision.thread.is_alive():
+            self.vision.close()
         self.camera.close()
         self.thermal.close()
         if self.cloud:
@@ -256,6 +261,7 @@ class Gateway:
                 self.disarm('Motor connection lost')
                 raise ValueError('Motor connection lost')
             self.last_command = time.monotonic()
+            if abs(linear)+abs(angular)+abs(sideways)>1e-7:self.last_motion_at=self.last_command
             self.sequence = seq
 
     def watchdog(self):
@@ -290,9 +296,13 @@ class Gateway:
             lidar = dict(self.lidar)
             if lidar.get('received') and now - lidar['received'] > 2:
                 lidar = {'online': False, 'reason': 'LiDAR data stale'}
+            from sensor_evidence import compose_evidence
+            vision=self.vision.details()
+            moving=bool(self.owner and self.motors.details().get('moving')) or now-self.last_motion_at<3
+            evidence=compose_evidence(self.radar,vision,moving)
             # Keep telemetry bounded and never proxy upstream credentials.
             return {'mode': 'live', 'camera': state(self.camera), 'thermal': state(self.thermal),
-                    'wifi': self.wifi, 'radar': self.radar, 'lidar': lidar,
+                    'wifi': self.wifi, 'radar': self.radar, 'lidar': lidar, 'vision': vision, 'evidence': evidence,
                     'control': {'armed': bool(self.owner), 'mine': self.owner == session,
                                 'enabled': self.args.enable_drive,
                                 'driver': self.motors.details(),
@@ -379,8 +389,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, image, 'image/png') if image else self.send(503, {'error': 'Map building'})
         if path == '/api/status':
             return self.send(200, self.app.status(session))
-        if path in ('/api/camera.mjpg', '/api/thermal.mjpg'):
-            camera = self.app.camera if path == '/api/camera.mjpg' else self.app.thermal
+        if path in ('/api/camera.mjpg', '/api/thermal.mjpg', '/api/camera-analysis.mjpg'):
+            camera = self.app.vision if path == '/api/camera-analysis.mjpg' else self.app.camera if path == '/api/camera.mjpg' else self.app.thermal
             self.send_response(200)
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
             self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
@@ -405,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
         allowed = {'/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css',
-                   '/drive.js': 'drive.js', '/control.js': 'control.js', '/lidar.js': 'lidar.js', '/cloud3d.js': 'cloud3d.js', '/cloud_codec.mjs': 'cloud_codec.mjs',
+                   '/drive.js': 'drive.js', '/control.js': 'control.js', '/lidar.js': 'lidar.js', '/evidence.js': 'evidence.js', '/cloud3d.js': 'cloud3d.js', '/cloud_codec.mjs': 'cloud_codec.mjs',
                    '/vendor/three/three.module.js': 'vendor/three/three.module.js',
                    '/vendor/three/three.core.js': 'vendor/three/three.core.js',
                    '/vendor/three/OrbitControls.js': 'vendor/three/OrbitControls.js', '/live.js': 'live.js', '/manifest.webmanifest': 'manifest.webmanifest',
@@ -462,10 +472,10 @@ def main():
     parser.add_argument('--camera')
     parser.add_argument('--thermal')
     parser.add_argument('--ruview-token-file', default=str(Path.home() / '.config/ruview/api_token'))
-    parser.add_argument('--lidar-mode', choices=('2d','3d'), default='3d')
+    parser.add_argument('--lidar-mode', choices=('2d','3d'), default='2d')
     parser.add_argument('--lidar-model', choices=('mid360','mid360s'), default='mid360s')
     parser.add_argument('--lidar-ip', default='192.168.1.3')
-    parser.add_argument('--radar-status-file', default='/srv/team28/Team-28/runtime/radar/status.json')
+    parser.add_argument('--radar-status-file', default='/srv/team28/runtime/radar/status.json')
     parser.add_argument('--enable-drive', action='store_true', help='Enable tested chassis controls for connected Tailscale operators')
     args = parser.parse_args()
     sys.path.insert(0, '/srv/team28/Team-28')
@@ -484,6 +494,7 @@ def main():
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, exit_signal)
     signal.signal(signal.SIGINT, exit_signal)
+    app.vision.start()
     for target in (app.camera.run, app.thermal.run, app.watchdog, app.wifi_poll, app.lidar_poll, app.radar_poll):
         threading.Thread(target=target, daemon=True).start()
     print(f'WaveSense listening on http://{args.bind}:{args.port}; motors disarmed', flush=True)

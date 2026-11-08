@@ -1,8 +1,10 @@
 import argparse
+import sys
 import importlib.util
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).parents[1]))
 spec=importlib.util.spec_from_file_location('gateway',Path(__file__).parents[1]/'camera_preview.py')
 gateway=importlib.util.module_from_spec(spec);spec.loader.exec_module(gateway)
 class FakeMotors:
@@ -62,4 +64,10 @@ class GatewayTests(unittest.TestCase):
   with self.assertRaises(gateway.StaleCommand):self.drive('a',1,.35,0)
   self.assertEqual(self.app.motors.commands[-1],(0,0,0))
  def test_default_watchdog_is_300_ms(self):self.assertEqual(gateway.WATCHDOG,.3)
+ def test_radar_cue_pauses_through_release_and_settling_interval(self):
+  self.app.radar={'online':True,'state':'candidate','tracks':[{'range_m':1.5}]}
+  with patch.object(gateway.time,'monotonic',return_value=100):
+   self.app.arm('a');self.drive('a',1,.1,0);self.drive('a',2,0,0);self.app.disarm('Released')
+  with patch.object(gateway.time,'monotonic',return_value=102.9):self.assertEqual(self.app.status('a')['evidence']['state'],'paused')
+  with patch.object(gateway.time,'monotonic',return_value=103.1):self.assertTrue(self.app.status('a')['evidence']['radar_candidate'])
 if __name__=='__main__':unittest.main()
