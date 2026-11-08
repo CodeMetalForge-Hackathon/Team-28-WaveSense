@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from xray.csi_packet import parse_frame  # noqa: E402
 from xray.engine import Calibration, NearZoneEngine  # noqa: E402
+from xray.fusion import fuse  # noqa: E402
 
 REC = struct.Struct("<dH")
 
@@ -46,6 +47,40 @@ def iface_network(iface: str) -> ipaddress.IPv4Interface:
         if "/" in tok and tok[0].isdigit():
             return ipaddress.IPv4Interface(tok)
     raise SystemExit(f"{iface} has no IPv4 address: is the hotspot up?")
+
+
+def count_stations(iface: str) -> int | None:
+    """Devices associated with the hotspot (count only: MACs are never kept). None if unknown."""
+    try:
+        out = subprocess.run(["iw", "dev", iface, "station", "dump"], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return sum(1 for line in out.stdout.splitlines() if line.startswith("Station "))
+
+
+STALE_S = 5.0
+
+
+def link_hint(stats: dict, stations: int | None, frame_age_s: float | None, iface: str, port: int) -> str | None:
+    """Why the link is not delivering CSI, in plain words. None when frames are flowing."""
+    if stats["csi_frames"]:
+        if frame_age_s is not None and frame_age_s > STALE_S:
+            return (f"CSI frames stopped {frame_age_s:.0f} s ago: did the node reboot, lose Wi-Fi or lose power? "
+                    "Read its console: python3 scripts/esp32_log.py")
+        return None
+    if not stats["received"]:
+        if stations == 0:
+            return (f"No device has joined the hotspot on {iface}, so the ESP32 is not connected. "
+                    "Read its console: python3 scripts/esp32_log.py (reason=201 = it cannot see the SSID)")
+        if stations:
+            return (f"{stations} device(s) joined the hotspot but nothing arrived on UDP port {port}: "
+                    "check the node's target address and port")
+        return "No datagrams received yet."
+    if stats["dropped_source"] == stats["received"]:
+        return "Datagrams arrive only from outside the hotspot subnet, and are dropped."
+    return "Datagrams arrive but none is an ESP32 CSI frame (magic 0xC5110001): firmware mismatch?"
 
 
 class Recorder:
@@ -75,7 +110,7 @@ def read_recording(path: str):
 
 class FrontDoor:
     def __init__(self, bind: str, port: int, allow: ipaddress.IPv4Network, forward: tuple | None,
-                 cal_dir: str, recorder: Recorder | None = None):
+                 cal_dir: str, recorder: Recorder | None = None, iface: str = "", station_probe=None):
         if bind == "0.0.0.0":
             raise SystemExit("refusing to bind 0.0.0.0: give the hotspot interface")
         self.allow, self.forward, self.cal_dir, self.recorder = allow, forward, cal_dir, recorder
@@ -87,6 +122,10 @@ class FrontDoor:
         self.stats = dict(received=0, csi_frames=0, other=0, dropped_source=0, forwarded=0, forward_errors=0)
         self.lock = threading.Lock()
         self.stop = threading.Event()
+        self.iface, self.port = iface, self.sock.getsockname()[1]
+        self.station_probe = station_probe
+        self.stations: int | None = None
+        self.last_frame_t: float | None = None
         os.makedirs(cal_dir, mode=0o700, exist_ok=True)
 
     def cal_path(self, node: int) -> str:
@@ -116,6 +155,7 @@ class FrontDoor:
             self.stats["other"] += 1           # vitals/sync packets etc.: forwarded, not analysed
             return
         self.stats["csi_frames"] += 1
+        self.last_frame_t = t
         with self.lock:
             self.engine(frame.node_id).feed(frame, t)
 
@@ -128,8 +168,16 @@ class FrontDoor:
                 continue
             self.handle(data, addr, time.time())
 
+    def probe_link(self) -> None:
+        if self.station_probe is not None:
+            self.stations = self.station_probe()
+
     def assess_loop(self) -> None:
+        ticks = 0
         while not self.stop.wait(1.0):
+            if ticks % 5 == 0:
+                self.probe_link()
+            ticks += 1
             now = time.time()
             with self.lock:
                 for node, eng in self.engines.items():
@@ -159,8 +207,12 @@ class FrontDoor:
         return dict(ok=all(v["ok"] for v in out.values()) if out else False, nodes=out)
 
     def status(self) -> dict:
+        now = time.time()
+        age = None if self.last_frame_t is None else round(now - self.last_frame_t, 1)
         with self.lock:
-            return dict(t=time.time(), link=dict(self.stats), nodes={str(k): v for k, v in self.reports.items()},
+            link = dict(self.stats, stations=self.stations, last_frame_age_s=age,
+                        hint=link_hint(self.stats, self.stations, age, self.iface or "the hotspot", self.port))
+            return dict(t=now, link=link, zone=fuse(self.reports), nodes={str(k): v for k, v in self.reports.items()},
                         recording=self.recorder.path if self.recorder else None,
                         disclaimer="Experimental Wi-Fi sensing. CANDIDATE indications for a human to verify; "
                                    "no location, no count, not validated for life-safety use.")
@@ -176,7 +228,9 @@ let h='';for(const [n,r] of Object.entries(s.nodes)){h+=`<p>Node ${n}: <span cla
 `<small>link ${r.rate_hz??'-'} fps, coverage ${r.coverage??'-'}, RSSI ${r.rssi_dbm?.toFixed?.(0)??'-'} dBm; `+
 `motion ${r.motion??'-'}; breathing-like ${r.evidence?.breathing?'yes ~'+Math.round(r.breathing_bpm)+'/min':'no'}; `+
 `profile ${r.profile_distance??'-'} / ${r.profile_threshold??'-'}</small></p>`}
-o.innerHTML=(h||'<p>No CSI node seen yet.</p>')+`<small>${s.disclaimer}<br>link: ${JSON.stringify(s.link)}</small>`}
+const z=s.zone,hint=s.link.hint?`<p class=warn>${s.link.hint}</p>`:'';
+o.innerHTML=hint+(h?`<p>Zone: <span class=c>${z.state}</span> <small>(${z.basis})</small><br>${z.label}</p>`+h:'<p>No CSI node seen yet.</p>')+
+`<small>${s.disclaimer}<br>link: ${JSON.stringify(s.link)}</small>`}
 catch(e){o.textContent='receiver not reachable'}}tick();setInterval(tick,1000)</script>"""
 
 
@@ -236,7 +290,9 @@ def main(argv=None):
             raise SystemExit("--forward must be a loopback address")
         forward = (host, int(port))
     rec = Recorder(os.path.expanduser(a.record), a.label) if a.record else None
-    door = FrontDoor(bind, a.port, allow, forward, os.path.expanduser(a.cal_dir), rec)
+    probe = None if a.bind else (lambda: count_stations(a.iface))
+    door = FrontDoor(bind, a.port, allow, forward, os.path.expanduser(a.cal_dir), rec,
+                     iface="" if a.bind else a.iface, station_probe=probe)
     httpd = make_http(door, a.http_port)
     for target in (door.udp_loop, door.assess_loop, httpd.serve_forever):
         threading.Thread(target=target, daemon=True).start()

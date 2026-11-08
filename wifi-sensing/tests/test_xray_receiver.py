@@ -9,7 +9,7 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from xray.csi_packet import build_frame  # noqa: E402
-from xray.receiver import FrontDoor, make_http, read_recording, Recorder  # noqa: E402
+from xray.receiver import FrontDoor, link_hint, make_http, read_recording, Recorder  # noqa: E402
 
 
 def udp_sink():
@@ -74,9 +74,38 @@ class Receiver(unittest.TestCase):
         self.assertIn(b"wifi-xray", urllib.request.urlopen(base + "/").read())
         httpd.shutdown()
 
+    def test_status_explains_a_silent_link(self):
+        self.door.station_probe = lambda: 0
+        self.door.probe_link()
+        st = self.door.status()
+        self.assertEqual(st["link"]["stations"], 0)
+        self.assertIn("No device has joined the hotspot", st["link"]["hint"])
+        self.assertEqual(st["zone"]["state"], "not_judging")
+        self.send(build_frame(np.ones((1, 8)), node_id=1))
+        time.sleep(0.2)
+        st = self.door.status()
+        self.assertIsNone(st["link"]["hint"])                     # frames are flowing
+        self.assertLess(st["link"]["last_frame_age_s"], 2)
+
     def test_refuses_wildcard_bind(self):
         with self.assertRaises(SystemExit):
             FrontDoor("0.0.0.0", 0, ipaddress.IPv4Network("10.0.0.0/8"), None, self.tmp)
+
+
+class Hints(unittest.TestCase):
+    Z = dict(received=0, csi_frames=0, other=0, dropped_source=0, forwarded=0, forward_errors=0)
+
+    def hint(self, stations=None, age=None, **stats):
+        return link_hint(dict(self.Z, **stats), stations, age, "wlan1", 5005)
+
+    def test_cases(self):
+        self.assertIn("No device has joined the hotspot on wlan1", self.hint(stations=0))
+        self.assertIn("nothing arrived on UDP port 5005", self.hint(stations=1))
+        self.assertEqual(self.hint(), "No datagrams received yet.")
+        self.assertIn("outside the hotspot subnet", self.hint(received=3, dropped_source=3))
+        self.assertIn("none is an ESP32 CSI frame", self.hint(received=3, other=3))
+        self.assertIsNone(self.hint(received=9, csi_frames=9, age=0.3))
+        self.assertIn("stopped 12 s ago", self.hint(received=9, csi_frames=9, age=12.0))
 
 
 if __name__ == "__main__":
