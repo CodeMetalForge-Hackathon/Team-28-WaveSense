@@ -123,5 +123,39 @@ class ServiceBearingTests(unittest.TestCase):
         self.assertNotIn("bearing_deg", report)
 
 
+@unittest.skipIf(np is None, "Needs numpy / Pi venv")
+class PlatformMovedTests(unittest.TestCase):
+    def service(self):
+        import threading
+        from radar_service import RadarService
+        service = RadarService.__new__(RadarService)
+        service.lock = threading.Lock()
+        service.settle_until = 0.0
+        service.resets = 0
+        def reset():
+            service.resets += 1
+        service.eng = types.SimpleNamespace(buf=[1, 2], _acc=[1], _acc_t=[1], reset_background=reset)
+        return service
+
+    def test_motion_is_forgotten_and_the_scene_is_relearned(self):
+        service = self.service()
+        self.assertTrue(service.platform_moved()["ok"])
+        self.assertEqual((service.eng.buf, service.eng._acc, service.eng._acc_t, service.resets), ([], [], [], 1))
+
+    def test_no_candidate_is_reported_while_settling(self):
+        from radar_service import contract_payload
+        service = self.service()
+        service.settle_until = 110.0
+        report = service.settled(dict(state="candidate_present", range_m=1.2, kind="moving", t=105.0))
+        payload = contract_payload(report, 105.0)
+        self.assertEqual((payload["state"], payload["tracks"], payload["online"]), ("not_judging", [], True))
+
+    def test_judging_resumes_after_settling(self):
+        service = self.service()
+        service.settle_until = 110.0
+        report = dict(state="candidate_present", range_m=1.2, kind="moving", t=111.0)
+        self.assertIs(service.settled(report), report)
+
+
 if __name__ == "__main__":
     unittest.main()
