@@ -42,3 +42,24 @@ The last completed Pi regression suite passed 62 tests. Synthetic tests cover ra
 App backup: `/srv/team28/wavesense-mobile/before-mini-swap`. Radar backup: `/home/adritforge/missions/before-swap-radar`. No raw recordings, camera images, credentials or runtime logs are included in Git.
 
 Source method: https://github.com/analogdevicesinc/TinyRadTool (commit dcea3878b73af183fa4404fc457da61380c29933), `RfGet('RxPosn')`, `ModBpa` factory correction/range preprocessing. Manufacturer guide: https://www.analog.com/media/en/technical-documentation/user-guides/ev-tinyrad24g-ug-1709.pdf
+
+## Stick response and maximum speed update
+
+Small slider between the sticks: 0–100%, default 50%, persisted on that phone. Zero
+sends neutral. It caps the combined normalized movement/rotation wheel mix, so
+diagonal movement plus turning cannot exceed the selected command limit. The
+existing physical motor limit is unchanged. This is a command percentage, not a
+calibrated ground-speed percentage; the chassis still has its wheel breakaway floor.
+
+Changed inputs no longer wait for the 75 ms heartbeat after an acknowledgement.
+At most two movement requests run concurrently; only the latest pending position
+is retained. Reversal/slowing input is prioritized. Full neutral bypasses movement
+requests, and clearing one motion axis also sends a priority zero before continuing
+the remaining axes. Sequence numbers and leases still reject stale commands.
+Heartbeat is 40 ms; normal moving input is coalesced at up to 50 Hz. Stick deadzone
+is reduced from 12% to 6%. Network and initial motor-controller arm handshake
+latency still apply. No automatic arming or movement on reconnect.
+
+Validation: existing control transport tests, new responsive-transport/speed-cap
+tests, and three local HTTP tests with fake motors passed. Slider UI was checked
+with an explicitly synthetic preview. No robot wheel movement was commanded.

@@ -171,3 +171,6 @@ resolution mismatch. Radar never creates an image box. The older exact-frame
 annotated endpoint remains available for diagnostics only.
 
 Run `node tests/test_person_overlay.js` for geometry/freshness checks.
+
+Maximum-speed slider: see HANDOFF.md. Run `node tests/test_responsive_control.js`
+for bounded-request, reversal, neutral-priority and combined speed-cap regressions.

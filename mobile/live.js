@@ -47,7 +47,7 @@
   async function session(){if(!sessionPending)sessionPending=request('/api/session').then(r=>{if(!r.ok)throw Object.assign(new Error('Session unavailable'),{status:r.status})}).finally(()=>sessionPending=null);return sessionPending}
   async function post(path,data){const r=await request(path,{data});if(!r.ok){const body=await r.json().catch(()=>({}));throw Object.assign(new Error(body.error||'Control unavailable'),{code:body.code})}return r.json()}
   window.addEventListener('wavesense:drive',e=>{if(live)control.input(e.detail)});
-  setInterval(()=>{if(live)control.tick()},75);
+  setInterval(()=>{if(live)control.tick()},40);
   ['blur','pagehide'].forEach(event=>window.addEventListener(event,()=>{if(live)control.release()}));
   document.addEventListener('visibilitychange',()=>{if(document.hidden){if(live)control.release();clearTimeout(pollTimer)}else if(live)poll()});
   async function poll(){clearTimeout(pollTimer);if(document.hidden)return;const generation=control.epoch;try{let r=await request('/api/status');if(r.status===401){await session();r=await request('/api/status')}if(!r.ok)throw new Error();status=await r.json();control.observe(status.control,generation);control.setAvailable(!!status.camera.online&&!!status.control.motor_access&&!!status.control.enabled);refreshViews();paintAvailability()}catch{if(live){status=null;control.setAvailable(false);refreshViews();paintAvailability()}}finally{if(live&&!document.hidden)pollTimer=setTimeout(poll,analysisEnabled?100:300)}}

@@ -59,3 +59,7 @@
 .mini-icon,.mini-expand{z-index:2}
 
 .viewport > .feed-shell[data-sensor=camera] .live-feed{object-fit:cover;object-position:center}
+
+.speed-limit{display:grid;grid-template-columns:14px minmax(60px,105px) 30px;align-items:center;gap:5px;color:#bbb;font:10px monospace;max-width:170px;user-select:none}.speed-limit input{width:100%;height:32px;margin:0;accent-color:#eee;touch-action:pan-x}.speed-limit output{font-size:10px;text-align:right}.drive-middle{gap:2px}.speed-limit>span{font-size:16px}
+@media(orientation:landscape) and (min-width:600px){.drive-middle{max-width:190px;padding:3px 8px}.speed-limit input{height:28px}}
+@media(max-width:370px){.joystick{width:96px;height:96px}.speed-limit{grid-template-columns:10px minmax(24px,1fr) 25px;gap:2px;width:100%}.speed-limit>span{font-size:13px}}
