@@ -4,7 +4,7 @@ Phone: http://100.99.36.78:8080/ (Tailscale connected, refresh after updates).
 Driving is enabled. Left stick moves; right stick turns. Release to stop.
 
 Tap ⏻ beside Radar or LiDAR to turn it on; tap again to turn it off.
-Turning on the other sensor stops the first. Both cannot capture together.
+Each button only controls its own sensor. Both can run together on the new power setup.
 White button = selected. Selection survives view changes and phone reconnects.
 Sensor changes stop any current drive command; use fresh stick input afterward.
 Camera keeps running. Tap a sensor label to change the main view.

@@ -160,7 +160,7 @@ class Gateway:
     def radar_poll(self):
         from radar_status import read_radar
         while True:
-            self.radar = read_radar(self.args.radar_status_file) if self.sensor_modes.mode == "radar" else {"online":False,"tracks":[],"reason":"Radar off"}
+            self.radar = read_radar(self.args.radar_status_file) if self.sensor_modes.enabled["radar"] else {"online":False,"tracks":[],"reason":"Radar off"}
             time.sleep(.3)
 
     def start_lidar(self):
@@ -336,7 +336,7 @@ class Gateway:
                 return {'online': detail == 'live' and now - updated < 1,
                         'reason': detail, 'age': round(now - updated, 2) if updated else None,
                         **camera.details()}
-            lidar = dict(self.lidar) if self.sensor_modes.mode == "lidar" else {"mode":"2d","online":False,"reason":"LiDAR off","points":[]}
+            lidar = dict(self.lidar) if self.sensor_modes.enabled["lidar"] else {"mode":"2d","online":False,"reason":"LiDAR off","points":[]}
             if lidar.get('received') and now - lidar['received'] > 2:
                 lidar = {'online': False, 'reason': 'LiDAR data stale'}
             from sensor_evidence import compose_evidence
@@ -484,10 +484,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(413, {'error': 'Invalid body size'})
             data = json.loads(self.rfile.read(length))
             path = urlparse(self.path).path
-            if path == '/api/sensor-mode':
+            if path in ('/api/sensor-mode','/api/sensor'):
                 self.app.disarm('Sensor change')
                 try:
-                    self.app.sensor_modes.select(data.get('mode'))
+                    if path == '/api/sensor':
+                        self.app.sensor_modes.set_enabled(data.get('sensor'),data.get('enabled'))
+                    else: self.app.sensor_modes.select(data.get('mode'))
                     return self.send(200, {'ok':True,'sensors':self.app.sensor_modes.status()})
                 except (ValueError, RuntimeError, OSError) as e:
                     return self.send(409, {'error':str(e)})

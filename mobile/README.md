@@ -78,7 +78,7 @@ resets backoff. The app does not launch or overwrite this separate service.
 
 ## Actual validation on 2026-11-08
 
-- 51 Python regression tests pass on the Pi, with mocked motors and USB in tests.
+- 52 Python regression tests pass on the Pi, with mocked motors and USB in tests.
   JS checks pass for control release, map projection, cloud decoding and evidence.
 - RGB measured ~12.5 fps; annotated output ~4.5 fps; inference ~90 ms on Pi 5.
   C1 measured ~10 sweeps/s. A 45 s stationary monitor had fresh camera, analysis
@@ -93,15 +93,14 @@ resets backoff. The app does not launch or overwrite this separate service.
   analysis samples fresh, camera ~22.6 fps, radar ~250 frames/s, zero radar
   reconnects. A startup USB command race was also removed before that comparison,
   so the test supports reduced concurrent load but does not isolate the sole cause.
-  Current phone server has exclusive Radar / LiDAR power toggles. Both start off;
-  tap a power icon to start that sensor, tap again to stop it. Selecting the other
-  sensor fully stops the active source first. Selection stays active across view
-  changes and phone reconnects until turned off or the server shuts down. All-three-
-  sensor stability and through-wall behaviour are **not passed**.
+  On the new two-source supply and powered hub, a 45 s simultaneous camera +
+  radar + C1 + SLAM test passed: all 45 samples fresh, camera minimum 22.4 fps,
+  C1 minimum 9.8 sweeps/s, radar advanced 11,045 frames, zero radar/C1 reconnects,
+  unchanged camera reconnect count. Through-wall classification remains unvalidated.
 - Thermal was absent. No thermal-live or Livox-live result is claimed.
 
-Use mutually exclusive capture for now: stop C1 before running radar, and stop
-radar before returning to the normal C1 console. Do not start a second USB owner. Let its background learn with an empty scene, then compare
+Camera, radar and C1 may now capture together on the tested two-source supply.
+Do not start a second reader for any device. Let radar background learn with an empty scene, then compare
 empty, camera-visible person, and occluded person cases with the robot stationary.
 Check both false positives and recovery. A range-only candidate must remain a range
 cue, even when someone visible is at a similar distance. Angle processing plus
@@ -128,17 +127,20 @@ SHA-256: `4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186`.
 All images and inference remain on the Pi. The generic person model is not face or
 identity recognition and is not trained or validated for this robot's environment.
 
-## Exclusive sensor controls and driving update
+## Independent sensor controls and driving update
 
 Run `./start.sh` to enable operator driving. It runs under the existing adritforge
 account because that account owns TinyRadTool and its virtual environment. Use
 `./start-stationary.sh` for view-only checks. Both sensors initially start off.
-The 2D C1 is the LiDAR source for the exclusive switch.
+The 2D C1 is the active LiDAR source.
 
-Tap the small ⏻ next to Radar or LiDAR. White means selected. Selecting one stops
-the other; selecting it again turns it off. Server serializes requests from all
-phones. Switching disarms active driving; use fresh stick input afterward. Failed
-or unconfirmed stop blocks starting the next sensor. Camera continues independently.
+Tap the small ⏻ next to Radar or LiDAR. White means selected. Each button only
+controls its own device; both can stay on. Switching either off leaves the other
+running. Per-sensor requests are serialized across phones, so simultaneous choices
+do not overwrite each other. Selection survives view changes and phone reconnects.
+Sensor changes disarm active driving; use fresh stick input afterward. Camera
+continues independently. Startup begins with both off; shutdown cleans up both,
+even if one fails to stop. The legacy mode endpoint also accepts `both`.
 Do not start a separate radar or LiDAR test program alongside this server.
 
 Live validation: LiDAR-only capture, LiDAR→Radar, Radar off and reverse switching

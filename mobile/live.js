@@ -7,8 +7,8 @@
     for(const [key,mode] of [["lidar","lidar"],["wifi","radar"]]){
       const card=app.querySelector(`.sensor-card[data-sensor="${key}"]`); if(!card)continue;
       let b=card.querySelector(".sensor-power");
-      if(!b){b=document.createElement("button");b.className="sensor-power";b.setAttribute("aria-label",`Toggle ${mode}`);card.append(b);b.onclick=async e=>{e.stopPropagation();if(sensorPending)return;sensorPending=true;sensorButtons();try{const r=await request("/api/sensor-mode",{data:{mode:status?.sensors?.mode===mode?"off":mode},timeout:30000});const body=await r.json();if(!r.ok)throw new Error(body.error||"Sensor unavailable");await poll()}catch(err){command.textContent=err.message}finally{sensorPending=false;sensorButtons()}}}
-      const on=status?.sensors?.mode===mode;b.textContent="⏻";b.setAttribute("aria-pressed",String(on));b.disabled=sensorPending||status?.sensors?.mode==="switching";card.classList.toggle("powered",on);
+      if(!b){b=document.createElement("button");b.className="sensor-power";b.setAttribute("aria-label",`Toggle ${mode}`);card.append(b);b.onclick=async e=>{e.stopPropagation();if(sensorPending)return;sensorPending=true;sensorButtons();try{const r=await request("/api/sensor",{data:{sensor:mode,enabled:!status?.sensors?.enabled?.[mode]},timeout:30000});const body=await r.json();if(!r.ok)throw new Error(body.error||"Sensor unavailable");await poll()}catch(err){command.textContent=err.message}finally{sensorPending=false;sensorButtons()}}}
+      const on=!!status?.sensors?.enabled?.[mode];b.textContent="⏻";b.setAttribute("aria-pressed",String(on));b.disabled=sensorPending||status?.sensors?.switching;card.classList.toggle("powered",on);
     }
   }
   let live=false,status=null,pollTimer=null,sessionPending=null;
